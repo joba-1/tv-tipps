@@ -71,7 +71,10 @@ class Settings(BaseSettings):
                 k = k.strip().lower()
                 v = v.strip()
                 if k == "priority":
-                    rcfg.priority = int(v)
+                    try:
+                        rcfg.priority = int(v)
+                    except ValueError:
+                        pass  # leave default
                 elif k == "has_genre":
                     rcfg.has_genre = v.lower() in ("true", "1", "yes")
                 elif k == "wol_mac":

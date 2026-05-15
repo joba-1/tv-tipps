@@ -56,8 +56,16 @@ async def _poll_receiver(receiver_name: str) -> None:
         receiver.power_state = power
 
         if power != "on":
-            if state["session_id"] and state["confirmed"]:
-                _close_session(state, now, db)
+            if state["session_id"]:
+                if state["confirmed"]:
+                    _close_session(state, now, db)
+                else:
+                    # Discard unconfirmed session: clear state so a later wake doesn't
+                    # confirm it based on a stale started_at.
+                    state["session_id"] = None
+                    state["session_start"] = None
+                    state["confirmed"] = False
+                    state["last_sref"] = None
             db.commit()
             log.debug("poller.standby", receiver=receiver_name, power=power)
             return
@@ -132,7 +140,7 @@ def _open_session(receiver: Receiver, sref: str, source: str, now: datetime, db:
 
 def _confirm_session(state: dict, receiver: Receiver, db: Session) -> None:
     from app.models import ViewingSession, EpgEvent, Channel
-    session = db.query(ViewingSession).get(state["session_id"])
+    session = db.get(ViewingSession, state["session_id"])
     if not session:
         return
     session.confirmed = True
@@ -146,8 +154,8 @@ def _confirm_session(state: dict, receiver: Receiver, db: Session) -> None:
             session.confidence = 0.6
             session.attribution_method = "default"
 
-    # Link EPG event
-    channel = db.query(Channel).get(session.channel_id)
+    # Link EPG event — at slot boundaries multiple events may overlap; pick the most recent start.
+    channel = db.get(Channel, session.channel_id)
     if channel:
         epg_event = (
             db.query(EpgEvent)
@@ -156,6 +164,7 @@ def _confirm_session(state: dict, receiver: Receiver, db: Session) -> None:
                 EpgEvent.start_time <= session.started_at,
                 EpgEvent.end_time > session.started_at,
             )
+            .order_by(EpgEvent.start_time.desc())
             .first()
         )
         if epg_event:
@@ -168,7 +177,7 @@ def _confirm_session(state: dict, receiver: Receiver, db: Session) -> None:
 
 def _close_session(state: dict, ended_at: datetime, db: Session) -> None:
     from app.models import ViewingSession
-    session = db.query(ViewingSession).get(state["session_id"])
+    session = db.get(ViewingSession, state["session_id"])
     if session:
         session.ended_at = ended_at
         if session.started_at:

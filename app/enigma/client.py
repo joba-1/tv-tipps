@@ -63,7 +63,9 @@ class EnigmaClient:
             return False
 
     async def get_power_state(self) -> str:
-        """Returns 'on', 'standby', 'deep_standby', or 'unknown'."""
+        """Returns 'on', 'standby', or 'unknown'.
+        Deep-standby boxes don't respond to HTTP at all, so they map to 'unknown'
+        (distinguishable from light standby only by client.is_online() returning False)."""
         if self.mock:
             data = self._load_fixture("powerstate")
         else:

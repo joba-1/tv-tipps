@@ -7,6 +7,30 @@ from app.schemas import AdminStatus, ReceiverStatus
 router = APIRouter()
 
 
+@router.get("/api/receivers")
+async def list_receivers(db: Session = Depends(get_db)):
+    """Return configured receivers with current power state and capability flags."""
+    from app.enigma.client import EnigmaClient
+    from config import settings
+
+    result = []
+    for rcfg in settings.receivers_by_priority:
+        receiver = db.query(Receiver).filter_by(name=rcfg.name).first()
+        client = EnigmaClient(rcfg.ip, mock=settings.mock_receivers)
+        online = await client.is_online()
+        result.append({
+            "name": rcfg.name,
+            "ip": rcfg.ip,
+            "priority": rcfg.priority,
+            "has_genre": rcfg.has_genre,
+            "power_method": rcfg.power_method,
+            "online": online,
+            "power_state": receiver.power_state if receiver else "unknown",
+            "last_seen": receiver.last_seen.isoformat() if receiver and receiver.last_seen else None,
+        })
+    return result
+
+
 @router.get("/api/admin/status", response_model=AdminStatus)
 async def admin_status(db: Session = Depends(get_db)):
     from app.enigma.client import EnigmaClient
@@ -19,7 +43,6 @@ async def admin_status(db: Session = Depends(get_db)):
         online = await client.is_online()
         power_state = await client.get_power_state() if online else "unknown"
 
-        # Most recent cached_at in epg_events for this receiver's channels
         epg_cached_at = None
         if receiver:
             from sqlalchemy import text
@@ -49,33 +72,29 @@ async def admin_status(db: Session = Depends(get_db)):
 
 
 @router.post("/api/admin/refresh")
-async def admin_refresh(target: str = "all", background_tasks = None):
+async def admin_refresh(target: str = "all"):
     """Trigger immediate refresh. target: channels | epg | epg_full | all"""
-    from fastapi import BackgroundTasks
     from app.services.poller import run_refresh
-    # Run directly (fast for now/next; use background task for epg_full)
     await run_refresh(target)
     return {"ok": True, "target": target}
 
 
 @router.post("/api/admin/power")
 async def admin_power(receiver: str, action: str):
-    """Manual power control. receiver: box15|box17, action: wake|sleep|on|off"""
-    from app.services.power import wake_box15, sleep_box15, power_on_box17, power_off_box17
-    if receiver == "box15":
-        if action == "wake":
-            ok = await wake_box15()
-        elif action == "sleep":
-            ok = await sleep_box15()
-        else:
-            return {"ok": False, "error": "box15 supports: wake, sleep"}
-    elif receiver == "box17":
-        if action == "on":
-            ok = await power_on_box17()
-        elif action == "off":
-            ok = await power_off_box17()
-        else:
-            return {"ok": False, "error": "box17 supports: on, off"}
+    """Manual power control. action: wake | sleep"""
+    from config import settings
+    from app.services.power import wake_receiver, sleep_receiver
+
+    rcfg = next((r for r in settings.receivers if r.name == receiver), None)
+    if not rcfg:
+        known = [r.name for r in settings.receivers]
+        return {"ok": False, "error": f"unknown receiver '{receiver}', known: {known}"}
+
+    if action == "wake":
+        ok = await wake_receiver(rcfg)
+    elif action == "sleep":
+        ok = await sleep_receiver(rcfg)
     else:
-        return {"ok": False, "error": "unknown receiver"}
-    return {"ok": ok, "receiver": receiver, "action": action}
+        return {"ok": False, "error": "action must be 'wake' or 'sleep'"}
+
+    return {"ok": ok, "receiver": receiver, "action": action, "power_method": rcfg.power_method}
