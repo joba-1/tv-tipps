@@ -375,6 +375,7 @@ dialog article {
 }
 dialog header { display: flex; justify-content: space-between; align-items: center; }
 button.close { background: none; border: none; font-size: 1.2rem; padding: 0; cursor: pointer; }
+.modal-reason { font-style: italic; color: var(--pico-muted-color); font-size: 0.9rem; border-top: 1px solid var(--pico-muted-border-color); margin-top: 0.5rem; padding-top: 0.5rem; }
 
 .loading-center { text-align: center; padding: 3rem; }
 .empty-state { text-align: center; color: var(--pico-muted-color); padding: 3rem; }

@@ -85,6 +85,8 @@ def rule_based_rank(candidates: list[EpgEvent], context: str, db: Session) -> li
             "sref": ch.sref,
             "channel_name": ch.name,
             "title": ev.title,
+            "short_desc": ev.short_desc,
+            "long_desc": ev.long_desc,
             "start_time": to_local_str(ev.start_time),
             "end_time": to_local_str(ev.end_time),
             "genre": ev.genre,
@@ -133,6 +135,7 @@ def _build_prompt(
     }
     ctx_label = ctx_labels.get(context, context)
 
+    stated_prefs = profile.get("stated_preferences") or ""
     genres_str = ", ".join(
         f"{g['genre']} ({g['share']*100:.0f}%)"
         for g in profile.get("top_genres", [])[:5]
@@ -147,21 +150,25 @@ def _build_prompt(
     hist_str = "\n".join(hist_lines) if hist_lines else "  (keine Historie)"
 
     cand_lines = []
-    for ev in candidates:
+    for i, ev in enumerate(candidates):
         ch = db.get(Channel, ev.channel_id)
         if not ch:
             continue
         dur_min = (ev.duration_sec or 0) // 60
-        desc = (ev.short_desc or "")[:80]
         cand_lines.append(
-            f"  {ch.sref} | {ch.name} | {ev.title} | "
+            f"  [{i+1}] {ch.name} | {ev.title} | "
             f"{to_local_str(ev.start_time)}–{to_local_str(ev.end_time)} | "
-            f"{ev.genre or '-'} | {dur_min} min | {desc}"
+            f"{ev.genre or '-'} | {dur_min} min"
         )
     cand_str = "\n".join(cand_lines) if cand_lines else "  (keine Sendungen)"
 
-    return f"""Du bist ein TV-Empfehlungssystem für {user_name}. Antworte NUR mit gültigem JSON, kein Markdown.
+    prefs_section = f"\nEXPLIZITE VORLIEBEN (vom Nutzer angegeben):\n{stated_prefs}\n" if stated_prefs else ""
 
+    return f"""Du bist ein TV-Empfehlungssystem für {user_name}. Antworte NUR mit gültigem JSON ohne Markdown.
+
+AUFGABE: Wähle aus der nummerierten KANDIDATENLISTE die passendsten Sendungen für {user_name} aus.
+Antworte ausschließlich mit den Nummern aus der Liste (keine neuen Sendungen erfinden).
+{prefs_section}
 NUTZERPROFIL ({profile.get('session_count', 0)} Sitzungen, letzte 30 Tage):
 - Lieblingsgenres: {genres_str or 'unbekannt'}
 - Häufigste Sender: {channels_str or 'unbekannt'}
@@ -170,32 +177,63 @@ NUTZERPROFIL ({profile.get('session_count', 0)} Sitzungen, letzte 30 Tage):
 LETZTE SEHHISTORIE:
 {hist_str}
 
-KANDIDATEN ({ctx_label}):
+KANDIDATENLISTE:
 {cand_str}
 
-JSON-Struktur (genau so):
-{{"taste_summary": "Ein Satz über den Geschmack", "recommendations": [{{"sref": "...", "channel_name": "...", "title": "...", "start_time": "YYYY-MM-DD HH:MM", "end_time": "YYYY-MM-DD HH:MM", "genre": "..." oder null, "match_score": 0.0-1.0, "reason": "Ein Satz mit Bezug zur Historie"}}]}}
+JSON-Antwort (genau dieses Format, keine anderen Felder):
+{{"taste_summary": "Ein Satz über {user_name}s Geschmack", "ranking": [nr1, nr2, nr3, ...], "reasons": {{"nr": "Ein Satz Begründung"}}}}
 
-Regeln: 5–10 Ergebnisse, nach match_score absteigend. Für "prime" und "today" Kurznachrichten/Wetter unter 20 Minuten ausschließen."""
+Regeln: 5–8 Nummern aus der Liste, nach Passgenauigkeit absteigend."""
 
 
 async def _try_ollama(
     user_name: str, context: str, profile: dict,
     history: list[dict], candidates: list[EpgEvent], db: Session,
 ) -> dict | None:
-    from pydantic import ValidationError
-    from app.schemas import RecommendationResponse
-
+    """Ask LLM to rank candidate indices, then fill in metadata server-side."""
     prompt = _build_prompt(user_name, context, profile, history, candidates, db)
     raw = await ask_json(prompt)
-    if not raw:
+    if not raw or not isinstance(raw, dict) or "ranking" not in raw:
+        log.warning("recommendations.bad_llm_response", raw_type=type(raw).__name__, keys=list(raw.keys()) if isinstance(raw, dict) else None)
         return None
-    try:
-        validated = RecommendationResponse.model_validate(raw)
-        return validated.model_dump()
-    except (ValidationError, Exception) as e:
-        log.warning("recommendations.validation_failed", error=str(e))
+
+    # Build candidate lookup by 1-based index
+    indexed: dict[int, tuple[EpgEvent, object]] = {}
+    for i, ev in enumerate(candidates):
+        ch = db.get(Channel, ev.channel_id)
+        if ch:
+            indexed[i + 1] = (ev, ch)
+
+    reasons: dict = raw.get("reasons") or {}
+    items = []
+    for nr in raw["ranking"]:
+        try:
+            nr_int = int(nr)
+        except (TypeError, ValueError):
+            continue
+        if nr_int not in indexed:
+            continue
+        ev, ch = indexed[nr_int]
+        score = (len(raw["ranking"]) - len(items)) / len(raw["ranking"])
+        items.append({
+            "sref": ch.sref,
+            "channel_name": ch.name,
+            "title": ev.title,
+            "short_desc": ev.short_desc,
+            "long_desc": ev.long_desc,
+            "start_time": to_local_str(ev.start_time),
+            "end_time": to_local_str(ev.end_time),
+            "genre": ev.genre,
+            "match_score": round(score, 2),
+            "reason": reasons.get(str(nr_int), reasons.get(str(nr), "")),
+        })
+
+    if not items:
         return None
+    return {
+        "taste_summary": raw.get("taste_summary", ""),
+        "recommendations": items,
+    }
 
 
 def _save_cache(user_id: int, context: str, result: dict, ttl_min: int, db: Session) -> None:
@@ -238,7 +276,8 @@ async def get_recommendations(user_id: int, user_name: str, context: str, db: Se
     candidates = _epg_candidates(context, channel_ids, db)
 
     profile = get_profile(user_id, db)
-    cold_start = profile.get("session_count", 0) < 10
+    # Skip cold-start gate when stated preferences are set — AI has enough context.
+    cold_start = profile.get("session_count", 0) < 10 and not profile.get("stated_preferences")
 
     ai_result = None
     if not cold_start and candidates:

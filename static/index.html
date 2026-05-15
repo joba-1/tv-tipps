@@ -123,7 +123,7 @@
           </div>
           <div class="rec-reason" x-text="rec.reason"></div>
           <footer>
-            <button @click="watchChannel(rec.sref)" class="watch-btn"
+            <button @click.stop="watchChannel(rec.sref)" class="watch-btn"
                     x-text="t('btn.watch')"></button>
           </footer>
         </article>
@@ -336,6 +336,7 @@
       <p x-text="modalEvent?.short_desc"></p>
       <p x-text="modalEvent?.long_desc"
          x-show="modalEvent?.long_desc && modalEvent?.long_desc !== modalEvent?.short_desc"></p>
+      <p x-show="modalEvent?.reason" class="modal-reason" x-text="modalEvent?.reason"></p>
     </article>
   </dialog>
 
