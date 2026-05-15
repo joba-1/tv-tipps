@@ -47,9 +47,28 @@ class ReceiverStatus(BaseModel):
     power_state: str
     last_seen: str | None
     epg_cached_at: str | None
+    power_method: str = "none"
+    has_genre: bool = False
+    priority: int = 99
 
 
 class AdminStatus(BaseModel):
     receivers: list[ReceiverStatus]
     db_channel_count: int
     db_epg_event_count: int
+
+
+class RecommendationItem(BaseModel):
+    sref: str
+    channel_name: str
+    title: str
+    start_time: str
+    end_time: str
+    genre: str | None = None
+    match_score: float
+    reason: str
+
+
+class RecommendationResponse(BaseModel):
+    taste_summary: str
+    recommendations: list[RecommendationItem]

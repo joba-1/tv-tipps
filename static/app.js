@@ -1,18 +1,20 @@
 // tv-tips Alpine.js application
 
-const USERS = [
-  { slug: "alice", name: "Alice" },
-  { slug: "bob",   name: "Bob"   },
-];
-
 function tvApp() {
   return {
     // Routing
-    page: "now",
+    page: "recs",
 
-    // User
-    users: USERS,
+    // Users
+    users: [],
     currentUser: null,
+
+    // Recommendations
+    recsData: null,
+    loadingRecs: false,
+    recsContext: "now",
+    zapToast: "",
+    _zapTimer: null,
 
     // Now & Next
     nowNext: [],
@@ -25,39 +27,110 @@ function tvApp() {
     loadingEpg: false,
     epgContext: "tonight",
 
-    // Receiver status
-    receiverStatus: [],
+    // Receivers
+    receivers: [],
+
+    // Admin
+    adminStatus: null,
+    adminRefreshing: false,
+    adminMsg: "",
 
     // Modal
     modalOpen: false,
     modalEvent: null,
     modalChannel: "",
 
-    // Auto-refresh timer
-    _nowNextTimer: null,
-
     async init() {
-      // Hash-based routing
       const route = () => {
-        const hash = window.location.hash.replace("#", "").replace(/^\//, "");
-        this.page = hash || "now";
-        if (this.page === "epg") this.loadEpg();
+        const hash = window.location.hash.replace(/^#\/?/, "");
+        this.page = hash || "recs";
+        if (this.page === "epg")   this.loadEpg();
+        if (this.page === "now")   this.loadNowNext();
+        if (this.page === "recs")  this.loadRecs();
+        if (this.page === "admin") this.loadAdminStatus();
       };
       window.addEventListener("hashchange", route);
+
+      await this.loadReceivers();
+
+      // Restore user from cookie; fall back to first from API
+      const cookieUser = this._getCookie("tv_tips_user");
+      this.currentUser = this.users.find(u => u.slug === cookieUser) || this.users[0] || null;
+
       route();
 
-      // Restore user from cookie
-      const cookieUser = this._getCookie("tv_tips_user");
-      this.currentUser = USERS.find(u => u.slug === cookieUser) || USERS[0];
+      // Periodic refresh
+      setInterval(() => this.loadReceivers(), 30_000);
+      setInterval(() => {
+        if (this.page === "recs") this.loadRecs();
+        if (this.page === "now")  this.loadNowNext();
+      }, 120_000);
+    },
 
-      // Initial load
-      await this.loadNowNext();
-      this.loadReceiverStatus();
+    async loadReceivers() {
+      try {
+        const res = await fetch("/api/receivers");
+        if (!res.ok) return;
+        this.receivers = await res.json();
+        // Also fetch users if not loaded yet
+        if (this.users.length === 0) {
+          const ur = await fetch("/api/users");
+          if (ur.ok) {
+            this.users = await ur.json();
+            if (!this.currentUser && this.users.length > 0) {
+              const slug = this._getCookie("tv_tips_user");
+              this.currentUser = this.users.find(u => u.slug === slug) || this.users[0];
+            }
+          }
+        }
+        const anyOffline = this.receivers.some(r => !r.online || r.power_state !== "on");
+        if (anyOffline && (this.nowNext.length > 0 || (this.recsData && this.recsData.recommendations && this.recsData.recommendations.length > 0))) {
+          this.staleBanner = true;
+        }
+      } catch (_) {}
+    },
 
-      // Auto-refresh now & next every 2 min
-      this._nowNextTimer = setInterval(() => this.loadNowNext(), 120_000);
-      // Refresh receiver status every 30s
-      setInterval(() => this.loadReceiverStatus(), 30_000);
+    async loadRecs() {
+      this.loadingRecs = true;
+      try {
+        const res = await fetch(`/api/recommendations?context=${this.recsContext}`, { credentials: "include" });
+        if (!res.ok) throw new Error(res.statusText);
+        this.recsData = await res.json();
+      } catch (e) {
+        console.error("loadRecs failed:", e);
+      } finally {
+        this.loadingRecs = false;
+      }
+    },
+
+    setRecsContext(ctx) {
+      this.recsContext = ctx;
+      this.recsData = null;
+      this.loadRecs();
+    },
+
+    async watchChannel(sref) {
+      try {
+        const res = await fetch("/api/remote/zap", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ sref }),
+        });
+        const data = await res.json();
+        if (data.ok) {
+          this._toast(data.woke ? `⚡ ${data.receiver_name} aufgeweckt & umgeschaltet` : `▶ Auf ${data.receiver_name} umgeschaltet`);
+        } else {
+          this._toast("⚠️ Zap fehlgeschlagen");
+        }
+      } catch (e) {
+        this._toast("⚠️ Verbindungsfehler");
+      }
+    },
+
+    _toast(msg) {
+      this.zapToast = msg;
+      clearTimeout(this._zapTimer);
+      this._zapTimer = setTimeout(() => { this.zapToast = ""; }, 3500);
     },
 
     async loadNowNext() {
@@ -80,8 +153,8 @@ function tvApp() {
       try {
         let url = "/api/epg?";
         if (this.epgContext === "tonight") url += "context=tonight";
-        else if (this.epgContext === "2h") url += "hours=2";
-        else if (this.epgContext === "4h") url += "hours=4";
+        else if (this.epgContext === "2h")  url += "hours=2";
+        else if (this.epgContext === "4h")  url += "hours=4";
         const res = await fetch(url, { credentials: "include" });
         if (!res.ok) throw new Error(res.statusText);
         this.epgEvents = await res.json();
@@ -92,28 +165,55 @@ function tvApp() {
       }
     },
 
-    async loadReceiverStatus() {
-      try {
-        const res = await fetch("/api/admin/status");
-        if (!res.ok) return;
-        const data = await res.json();
-        this.receiverStatus = data.receivers;
-        const anyOffline = data.receivers.some(r => !r.online || r.power_state !== "on");
-        if (anyOffline && this.nowNext.length > 0) this.staleBanner = true;
-      } catch (_) { /* silent */ }
-    },
-
     setEpgContext(ctx) {
       this.epgContext = ctx;
       this.loadEpg();
     },
 
+    async loadAdminStatus() {
+      try {
+        const res = await fetch("/api/admin/status");
+        if (!res.ok) return;
+        this.adminStatus = await res.json();
+        this.receivers = this.adminStatus.receivers;
+      } catch (_) {}
+    },
+
+    async adminRefresh(target) {
+      this.adminRefreshing = true;
+      this.adminMsg = "";
+      try {
+        const res = await fetch(`/api/admin/refresh?target=${target}`, { method: "POST" });
+        const data = await res.json();
+        this.adminMsg = data.ok ? `✓ ${target} aktualisiert` : `⚠️ Fehler`;
+        await this.loadAdminStatus();
+      } catch (_) {
+        this.adminMsg = "⚠️ Verbindungsfehler";
+      } finally {
+        this.adminRefreshing = false;
+      }
+    },
+
+    async receiverPower(name, action) {
+      try {
+        const res = await fetch(`/api/admin/power?receiver=${encodeURIComponent(name)}&action=${action}`, { method: "POST" });
+        const data = await res.json();
+        this.adminMsg = data.ok
+          ? `✓ ${name}: ${action === "wake" ? "aufgeweckt" : "schlafen gelegt"} (${data.power_method})`
+          : `⚠️ ${data.error || "Fehler"}`;
+        setTimeout(() => this.loadReceivers(), 3000);
+      } catch (_) {
+        this.adminMsg = "⚠️ Verbindungsfehler";
+      }
+    },
+
     async setUser(slug) {
-      this.currentUser = USERS.find(u => u.slug === slug) || USERS[0];
-      // Set cookie and reload data
+      this.currentUser = this.users.find(u => u.slug === slug) || this.users[0];
       document.cookie = `tv_tips_user=${slug}; path=/; max-age=31536000; SameSite=Lax`;
-      await this.loadNowNext();
-      if (this.page === "epg") await this.loadEpg();
+      this.recsData = null;
+      if (this.page === "recs")  await this.loadRecs();
+      if (this.page === "now")   await this.loadNowNext();
+      if (this.page === "epg")   await this.loadEpg();
     },
 
     showDetail(event, channelName) {
@@ -122,26 +222,18 @@ function tvApp() {
       this.modalOpen = true;
     },
 
-    piconUrl(ch) {
-      // Picons are served from the receiver directly
-      // We proxy them through /picon/ route (added later) or link directly
-      // For now, use box15 as primary source
-      if (!ch.picon_path) return "";
-      return `http://192.168.1.15${ch.picon_path}`;
+    piconUrl(piconPath) {
+      if (!piconPath) return "";
+      const best = [...this.receivers]
+        .filter(r => r.online)
+        .sort((a, b) => a.priority - b.priority)[0];
+      return best ? `http://${best.ip}${piconPath}` : "";
     },
 
     formatTime(isoStr) {
       if (!isoStr) return "";
-      const d = new Date(isoStr + "Z"); // treat as UTC
+      const d = new Date(isoStr + "Z");
       return d.toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" });
-    },
-
-    isPrimeTime(ev) {
-      if (!ev?.start_time) return false;
-      const d = new Date(ev.start_time + "Z");
-      const h = d.toLocaleString("de-DE", { hour: "2-digit", timeZone: "Europe/Berlin" });
-      const hour = parseInt(h, 10);
-      return hour >= 20 && hour < 21;
     },
 
     _getCookie(name) {

@@ -27,8 +27,15 @@ async def list_receivers(db: Session = Depends(get_db)):
             "online": online,
             "power_state": receiver.power_state if receiver else "unknown",
             "last_seen": receiver.last_seen.isoformat() if receiver and receiver.last_seen else None,
+            "wol_mac": rcfg.wol_mac,
         })
     return result
+
+
+@router.get("/api/users")
+def list_users(db: Session = Depends(get_db)):
+    from app.models import User
+    return [{"slug": u.slug, "name": u.name} for u in db.query(User).all()]
 
 
 @router.get("/api/admin/status", response_model=AdminStatus)
@@ -62,6 +69,9 @@ async def admin_status(db: Session = Depends(get_db)):
             power_state=power_state,
             last_seen=receiver.last_seen.isoformat() if receiver and receiver.last_seen else None,
             epg_cached_at=epg_cached_at,
+            power_method=rcfg.power_method,
+            has_genre=rcfg.has_genre,
+            priority=rcfg.priority,
         ))
 
     return AdminStatus(

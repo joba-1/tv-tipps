@@ -41,3 +41,34 @@ def tonight_range() -> tuple[datetime, datetime]:
 def hours_range(hours: float) -> tuple[datetime, datetime]:
     now = utcnow()
     return now, now + timedelta(hours=hours)
+
+
+def prime_range() -> tuple[datetime, datetime]:
+    """Return (start, end) naive UTC for tonight's prime-time window.
+    If we're already past tonight's prime end, return tomorrow's window.
+    """
+    tz = _tz()
+    now_local = datetime.now(tz)
+    prime_start = now_local.replace(
+        hour=settings.prime_start_hour, minute=0, second=0, microsecond=0
+    )
+    prime_end = now_local.replace(
+        hour=settings.prime_end_hour, minute=0, second=0, microsecond=0
+    )
+    if prime_end <= now_local:
+        prime_start += timedelta(days=1)
+        prime_end += timedelta(days=1)
+    return (
+        prime_start.astimezone(timezone.utc).replace(tzinfo=None),
+        prime_end.astimezone(timezone.utc).replace(tzinfo=None),
+    )
+
+
+def today_remaining_range() -> tuple[datetime, datetime]:
+    """Return (now, midnight_local) in naive UTC."""
+    tz = _tz()
+    midnight_local = (
+        datetime.now(tz).replace(hour=0, minute=0, second=0, microsecond=0)
+        + timedelta(days=1)
+    )
+    return utcnow(), midnight_local.astimezone(timezone.utc).replace(tzinfo=None)
