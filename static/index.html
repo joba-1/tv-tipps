@@ -19,12 +19,13 @@
     <ul>
       <li>
         <details class="dropdown">
-          <summary x-text="{'recs': t('nav.tips'), 'now': t('nav.now_next'), 'epg': t('nav.epg'), 'admin': t('nav.admin')}[page] || t('nav.tips')"></summary>
+          <summary x-text="{'recs': t('nav.tips'), 'now': t('nav.now_next'), 'epg': t('nav.epg'), 'admin': t('nav.admin'), 'remote': t('nav.remote')}[page] || t('nav.tips')"></summary>
           <ul>
-            <li><a href="#recs"  @click="$el.closest('details').removeAttribute('open')" x-text="t('nav.tips')"  :style="page==='recs'  ? 'font-weight:bold' : ''"></a></li>
-            <li><a href="#now"   @click="$el.closest('details').removeAttribute('open')" x-text="t('nav.now_next')" :style="page==='now'   ? 'font-weight:bold' : ''"></a></li>
-            <li><a href="#epg"   @click="$el.closest('details').removeAttribute('open')" x-text="t('nav.epg')"    :style="page==='epg'   ? 'font-weight:bold' : ''"></a></li>
-            <li><a href="#admin" @click="$el.closest('details').removeAttribute('open')" x-text="t('nav.admin')"  :style="page==='admin' ? 'font-weight:bold' : ''"></a></li>
+            <li><a href="#recs"   @click="$el.closest('details').removeAttribute('open')" x-text="t('nav.tips')"     :style="page==='recs'   ? 'font-weight:bold' : ''"></a></li>
+            <li><a href="#now"    @click="$el.closest('details').removeAttribute('open')" x-text="t('nav.now_next')" :style="page==='now'    ? 'font-weight:bold' : ''"></a></li>
+            <li><a href="#epg"    @click="$el.closest('details').removeAttribute('open')" x-text="t('nav.epg')"     :style="page==='epg'    ? 'font-weight:bold' : ''"></a></li>
+            <li><a href="#remote" @click="$el.closest('details').removeAttribute('open')" x-text="t('nav.remote')"  :style="page==='remote' ? 'font-weight:bold' : ''"></a></li>
+            <li><a href="#admin"  @click="$el.closest('details').removeAttribute('open')" x-text="t('nav.admin')"   :style="page==='admin'  ? 'font-weight:bold' : ''"></a></li>
           </ul>
         </details>
       </li>
@@ -259,6 +260,59 @@
       <p x-text="t('label.admin_channels', { n: adminStatus && adminStatus.db_channel_count })"></p>
       <p x-text="t('label.admin_epg_events', { n: adminStatus && adminStatus.db_epg_event_count })"></p>
     </div>
+  </main>
+
+  <!-- Remote control page -->
+  <main class="container" x-show="page==='remote'">
+    <div class="page-header">
+      <h2 x-text="t('page.remote.title')"></h2>
+      <span x-show="remoteMsg" class="remote-feedback" x-text="remoteMsg"></span>
+    </div>
+
+    <div class="remote-wrap">
+      <!-- Power row -->
+      <div class="remote-power-row">
+        <button class="outline remote-btn" @click="remoteOn()"        :disabled="remoteSending" x-text="t('btn.remote_on')"></button>
+        <button class="outline remote-btn" @click="sendKey('power')"  :disabled="remoteSending">⏸ Standby</button>
+        <button class="outline secondary remote-btn" @click="remoteOff()" :disabled="remoteSending" x-text="t('btn.remote_off')"></button>
+      </div>
+
+      <!-- Vol/Ch + D-pad side by side -->
+      <div class="remote-body">
+
+        <!-- Left column: Volume + Channel -->
+        <div class="remote-col-left">
+          <button class="outline remote-btn" @click="sendKey('vol_up')" :disabled="remoteSending">VOL+</button>
+          <button class="outline remote-btn" @click="sendKey('mute')"   :disabled="remoteSending">🔇</button>
+          <button class="outline remote-btn" @click="sendKey('vol_dn')" :disabled="remoteSending">VOL−</button>
+          <div class="remote-spacer"></div>
+          <button class="outline remote-btn" @click="sendKey('ch_up')"  :disabled="remoteSending">CH+</button>
+          <button class="outline remote-btn" @click="sendKey('ch_dn')"  :disabled="remoteSending">CH−</button>
+        </div>
+
+        <!-- Right column: D-pad + Menu/Back -->
+        <div class="remote-col-right">
+          <div class="remote-dpad">
+            <button class="outline remote-btn dpad-up"    @click="sendKey('up')"    :disabled="remoteSending">▲</button>
+            <button class="outline remote-btn dpad-left"  @click="sendKey('left')"  :disabled="remoteSending">◀</button>
+            <button class="outline remote-btn dpad-ok"    @click="sendKey('ok')"    :disabled="remoteSending">OK</button>
+            <button class="outline remote-btn dpad-right" @click="sendKey('right')" :disabled="remoteSending">▶</button>
+            <button class="outline remote-btn dpad-down"  @click="sendKey('down')"  :disabled="remoteSending">▼</button>
+          </div>
+          <div class="remote-nav-row">
+            <button class="outline remote-btn" @click="sendKey('menu')" :disabled="remoteSending">☰ Menu</button>
+            <button class="outline remote-btn" @click="sendKey('back')" :disabled="remoteSending">↩</button>
+          </div>
+        </div>
+
+      </div><!-- /remote-body -->
+
+      <!-- Screenshot feedback -->
+      <div class="remote-screenshot-wrap" x-show="remoteScreenshotUrl">
+        <img class="remote-screenshot" :src="remoteScreenshotUrl" alt="TV"
+             @error="remoteScreenshotUrl = ''" />
+      </div>
+    </div><!-- /remote-wrap -->
   </main>
 
   <!-- Programme detail modal -->

@@ -113,6 +113,22 @@ class EnigmaClient:
         data = await self._get("/api/remotecontrol", params={"command": code})
         return bool(data and data.get("result"))
 
+    async def screenshot(self) -> bytes | None:
+        """Fetch a JPEG screenshot from the receiver via /grab."""
+        if self.mock:
+            return None
+        try:
+            async with httpx.AsyncClient(timeout=httpx.Timeout(10.0)) as client:
+                r = await client.get(
+                    f"{self.base_url}/grab",
+                    params={"format": "jpg", "resize": "0"},
+                )
+                r.raise_for_status()
+                return r.content
+        except (httpx.RequestError, httpx.HTTPStatusError) as e:
+            log.warning("enigma.screenshot_failed", ip=self.ip, error=str(e))
+            return None
+
     def picon_url(self, picon_path: str) -> str:
         """Return full URL for a picon path from the receiver."""
         return f"{self.base_url}{picon_path}"

@@ -15,6 +15,9 @@ function tvApp() {
     users: [],
     currentUser: null,
 
+    // Receiver selector
+    selectedReceiver: null,
+
     // Recommendations
     recsData: null,
     loadingRecs: false,
@@ -40,6 +43,13 @@ function tvApp() {
     adminStatus: null,
     adminRefreshing: false,
     adminMsg: "",
+
+    // Remote control
+    remoteMsg: "",
+    _remoteMsgTimer: null,
+    remoteScreenshotUrl: "",
+    _remoteScreenshotTimer: null,
+    remoteSending: false,
 
     // Modal
     modalOpen: false,
@@ -96,12 +106,15 @@ function tvApp() {
       await this._loadI18n();
 
       const route = () => {
+        const prevPage = this.page;
         const hash = window.location.hash.replace(/^#\/?/, "");
         this.page = hash || "recs";
-        if (this.page === "epg")   this.loadEpg();
-        if (this.page === "now")   this.loadNowNext();
-        if (this.page === "recs")  this.loadRecs();
-        if (this.page === "admin") this.loadAdminStatus();
+        if (prevPage === "remote" && this.page !== "remote") this._stopScreenshotPoll();
+        if (this.page === "epg")    this.loadEpg();
+        if (this.page === "now")    this.loadNowNext();
+        if (this.page === "recs")   this.loadRecs();
+        if (this.page === "admin")  this.loadAdminStatus();
+        if (this.page === "remote") this._startScreenshotPoll();
       };
       window.addEventListener("hashchange", route);
 
@@ -109,6 +122,9 @@ function tvApp() {
 
       const cookieUser = this._getCookie("tv_tips_user");
       this.currentUser = this.users.find(u => u.slug === cookieUser) || this.users[0] || null;
+
+      const cookieReceiver = this._getCookie("tv_tips_receiver");
+      this.selectedReceiver = this.receivers.find(r => r.name === cookieReceiver) || null;
 
       route();
 
@@ -136,10 +152,9 @@ function tvApp() {
             }
           }
         }
-        const anyOffline = this.receivers.some(r => !r.online || r.power_state !== "on");
-        if (anyOffline && (this.nowNext.length > 0 ||
-            (this.recsData?.recommendations?.length > 0))) {
-          this.staleBanner = true;
+        // Keep selectedReceiver in sync when receivers list refreshes
+        if (this.selectedReceiver) {
+          this.selectedReceiver = this.receivers.find(r => r.name === this.selectedReceiver.name) || null;
         }
       } catch (_) {}
     },
@@ -170,10 +185,12 @@ function tvApp() {
 
     async watchChannel(sref) {
       try {
+        const body = { sref };
+        if (this.selectedReceiver) body.receiver = this.selectedReceiver.name;
         const res = await fetch("/api/remote/zap", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ sref }),
+          body: JSON.stringify(body),
         });
         const data = await res.json();
         if (data.ok) {
@@ -203,7 +220,7 @@ function tvApp() {
         const res = await fetch("/api/now-next", { credentials: "include" });
         if (!res.ok) throw new Error(res.statusText);
         this.nowNext = await res.json();
-        this.staleBanner = this.nowNext.some(ch => ch.stale);
+        this.staleBanner = this.nowNext.filter(ch => ch.stale).length > 1;
         this.lastRefresh = new Date().toLocaleTimeString(
           this.lang + "-" + this.lang.toUpperCase(),
           { hour: "2-digit", minute: "2-digit" }
@@ -287,7 +304,83 @@ function tvApp() {
       }
     },
 
-    // ── User switching ───────────────────────────────────────────────────────
+    // ── Remote control ───────────────────────────────────────────────────────
+
+    async sendKey(key) {
+      this.remoteSending = true;
+      try {
+        const body = { key };
+        if (this.selectedReceiver) body.receiver = this.selectedReceiver.name;
+        const res = await fetch("/api/remote/key", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+        });
+        const data = await res.json();
+        this._remoteToast(data.ok ? "✓" : "⚠️");
+        if (data.ok) setTimeout(() => this.refreshScreenshot(), 800);
+      } catch (_) {
+        this._remoteToast(this.t("msg.connect_error"));
+      } finally {
+        this.remoteSending = false;
+      }
+    },
+
+    async remoteOn() {
+      const name = this.selectedReceiver?.name;
+      if (!name) { this._remoteToast("⚠️"); return; }
+      try {
+        const res = await fetch(
+          `/api/admin/power?receiver=${encodeURIComponent(name)}&action=wake`,
+          { method: "POST" }
+        );
+        const data = await res.json();
+        this._remoteToast(data.ok ? "✓" : "⚠️");
+        if (data.ok) setTimeout(() => this.refreshScreenshot(), 4000);
+      } catch (_) { this._remoteToast("⚠️"); }
+    },
+
+    async remoteOff() {
+      const name = this.selectedReceiver?.name;
+      if (!name) { this._remoteToast("⚠️"); return; }
+      try {
+        const res = await fetch(
+          `/api/admin/power?receiver=${encodeURIComponent(name)}&action=sleep`,
+          { method: "POST" }
+        );
+        const data = await res.json();
+        this._remoteToast(data.ok ? "✓" : "⚠️");
+      } catch (_) { this._remoteToast("⚠️"); }
+    },
+
+    refreshScreenshot() {
+      const recv = this.selectedReceiver ? encodeURIComponent(this.selectedReceiver.name) : "";
+      this.remoteScreenshotUrl =
+        `/api/remote/screenshot?${recv ? "receiver=" + recv + "&" : ""}t=${Date.now()}`;
+    },
+
+    _startScreenshotPoll() {
+      this.refreshScreenshot();
+      if (!this._remoteScreenshotTimer) {
+        this._remoteScreenshotTimer = setInterval(() => this.refreshScreenshot(), 5000);
+      }
+    },
+
+    _stopScreenshotPoll() {
+      if (this._remoteScreenshotTimer) {
+        clearInterval(this._remoteScreenshotTimer);
+        this._remoteScreenshotTimer = null;
+      }
+      this.remoteScreenshotUrl = "";
+    },
+
+    _remoteToast(msg) {
+      this.remoteMsg = msg;
+      clearTimeout(this._remoteMsgTimer);
+      this._remoteMsgTimer = setTimeout(() => { this.remoteMsg = ""; }, 2000);
+    },
+
+    // ── User switching ────────────────────────────────────────────────────────
 
     async setUser(slug) {
       this.currentUser = this.users.find(u => u.slug === slug) || this.users[0];
@@ -296,6 +389,17 @@ function tvApp() {
       if (this.page === "recs") await this.loadRecs();
       if (this.page === "now")  await this.loadNowNext();
       if (this.page === "epg")  await this.loadEpg();
+    },
+
+    setReceiver(name) {
+      if (name === null) {
+        this.selectedReceiver = null;
+        document.cookie = "tv_tips_receiver=; path=/; max-age=0; SameSite=Lax";
+      } else {
+        this.selectedReceiver = this.receivers.find(r => r.name === name) || null;
+        if (this.selectedReceiver)
+          document.cookie = `tv_tips_receiver=${name}; path=/; max-age=31536000; SameSite=Lax`;
+      }
     },
 
     // ── Helpers ──────────────────────────────────────────────────────────────

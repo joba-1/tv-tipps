@@ -16,7 +16,7 @@
   "btn.wake": "⚡ Wake",
   "btn.sleep": "💤 Sleep",
   "btn.refresh_all": "↺ Alle Sender",
-  "btn.refresh_epg": "EPG voll",
+  "btn.refresh_epg": "↺ EPG voll",
   "btn.close": "Schließen",
 
   "msg.loading_tips": "Tips werden geladen…",
@@ -54,6 +54,11 @@
   "page.now.title": "Now & Next",
   "page.epg.title": "EPG",
   "page.admin.title": "Admin",
+  "page.remote.title": "Fernbedienung",
+
+  "nav.remote": "📱 Fernbedienung",
+  "btn.remote_on": "⏻ Ein",
+  "btn.remote_off": "⏼ Aus",
 
   "genre.spielfilm": "Spielfilm",
   "genre.film": "Film",
