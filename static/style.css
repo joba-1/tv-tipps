@@ -388,6 +388,28 @@ nav details ul a {
 }
 .admin-pref-row button { margin: 0; flex-shrink: 0; }
 
+.epg-search-input {
+  width: 100%;
+  margin: 0 0 1rem;
+  font-size: 0.9rem;
+  padding: 0.5rem 0.75rem;
+}
+
+.modal-footer {
+  display: flex;
+  justify-content: flex-end;
+  padding: 0;
+  margin-top: 0.75rem;
+  border: none;
+  background: none;
+}
+.like-btn { margin: 0; font-size: 0.9rem; }
+.like-btn.liked {
+  background: var(--pico-primary);
+  border-color: var(--pico-primary);
+  color: var(--pico-primary-inverse);
+}
+
 /* ---- Modal ---- */
 dialog article {
   max-width: 560px;

@@ -5,7 +5,7 @@ import json
 import re
 from datetime import timedelta
 from sqlalchemy.orm import Session
-from app.models import EpgEvent, Channel, RecommendationCache, ViewingSession
+from app.models import EpgEvent, Channel, RecommendationCache, ViewingSession, UserLike
 from app.services.profile import get_profile
 from app.services.ollama import ask_json
 from app.services.channels import get_channels_for_user
@@ -82,6 +82,7 @@ def rule_based_rank(candidates: list[EpgEvent], context: str, db: Session) -> li
     scored.sort(key=lambda x: -x[0])
     return [
         {
+            "id": ev.id,
             "sref": ch.sref,
             "channel_name": ch.name,
             "title": ev.title,
@@ -94,6 +95,20 @@ def rule_based_rank(candidates: list[EpgEvent], context: str, db: Session) -> li
             "reason": "Populärer Sender und passende Sendezeit",
         }
         for score, ev, ch in scored[:8]
+    ]
+
+
+def _get_recent_likes(user_id: int, db: Session, limit: int = 15) -> list[dict]:
+    rows = (
+        db.query(UserLike)
+        .filter(UserLike.user_id == user_id)
+        .order_by(UserLike.created_at.desc())
+        .limit(limit)
+        .all()
+    )
+    return [
+        {"title": r.title, "channel": r.channel_name or "?", "genre": r.genre}
+        for r in rows
     ]
 
 
@@ -125,7 +140,7 @@ def _get_recent_history(user_id: int, db: Session) -> list[dict]:
 
 def _build_prompt(
     user_name: str, context: str, profile: dict,
-    history: list[dict], candidates: list[EpgEvent], db: Session,
+    history: list[dict], likes: list[dict], candidates: list[EpgEvent], db: Session,
 ) -> str:
     ctx_labels = {
         "now": "gerade jetzt läuft",
@@ -148,6 +163,12 @@ def _build_prompt(
         for h in history[:20]
     ]
     hist_str = "\n".join(hist_lines) if hist_lines else "  (keine Historie)"
+
+    likes_lines = [
+        f"  - {l.get('title','?')} | {l.get('channel','?')} | {l.get('genre') or 'unbekannt'}"
+        for l in likes
+    ]
+    likes_str = "\n".join(likes_lines) if likes_lines else "  (keine)"
 
     cand_lines = []
     for i, ev in enumerate(candidates):
@@ -176,6 +197,9 @@ NUTZERPROFIL ({profile.get('session_count', 0)} Sitzungen, letzte 30 Tage):
 - Häufigste Sender: {channels_str or 'unbekannt'}
 - Ø Sehdauer: {profile.get('avg_duration_min', 0):.0f} min
 
+EXPLIZIT GEMERKT (👍 markiert, starkes positives Signal):
+{likes_str}
+
 LETZTE SEHHISTORIE:
 {hist_str}
 
@@ -190,10 +214,10 @@ Regeln: 5–8 Nummern aus der Liste, nach Passgenauigkeit absteigend."""
 
 async def _try_ollama(
     user_name: str, context: str, profile: dict,
-    history: list[dict], candidates: list[EpgEvent], db: Session,
+    history: list[dict], likes: list[dict], candidates: list[EpgEvent], db: Session,
 ) -> dict | None:
     """Ask LLM to rank candidate indices, then fill in metadata server-side."""
-    prompt = _build_prompt(user_name, context, profile, history, candidates, db)
+    prompt = _build_prompt(user_name, context, profile, history, likes, candidates, db)
     raw = await ask_json(prompt)
     if not raw or not isinstance(raw, dict) or "ranking" not in raw:
         log.warning("recommendations.bad_llm_response", raw_type=type(raw).__name__, keys=list(raw.keys()) if isinstance(raw, dict) else None)
@@ -218,6 +242,7 @@ async def _try_ollama(
         ev, ch = indexed[nr_int]
         score = (len(raw["ranking"]) - len(items)) / len(raw["ranking"])
         items.append({
+            "id": ev.id,
             "sref": ch.sref,
             "channel_name": ch.name,
             "title": ev.title,
@@ -278,13 +303,19 @@ async def get_recommendations(user_id: int, user_name: str, context: str, db: Se
     candidates = _epg_candidates(context, channel_ids, db)
 
     profile = get_profile(user_id, db)
-    # Skip cold-start gate when stated preferences are set — AI has enough context.
-    cold_start = profile.get("session_count", 0) < 10 and not profile.get("stated_preferences")
+    # Skip cold-start gate when stated preferences or any likes are set — AI has enough context.
+    like_count = db.query(UserLike).filter_by(user_id=user_id).count()
+    cold_start = (
+        profile.get("session_count", 0) < 10
+        and not profile.get("stated_preferences")
+        and like_count == 0
+    )
 
     ai_result = None
     if not cold_start and candidates:
         history = _get_recent_history(user_id, db)
-        ai_result = await _try_ollama(user_name, context, profile, history, candidates, db)
+        likes = _get_recent_likes(user_id, db)
+        ai_result = await _try_ollama(user_name, context, profile, history, likes, candidates, db)
 
     if ai_result is not None:
         result = {

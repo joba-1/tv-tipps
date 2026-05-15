@@ -171,6 +171,20 @@ class RecommendationCache(Base):
     response: Mapped[str] = mapped_column(Text, nullable=False)
 
 
+class UserLike(Base):
+    __tablename__ = "user_likes"
+    __table_args__ = (UniqueConstraint("user_id", "epg_event_id"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False)
+    epg_event_id: Mapped[int | None] = mapped_column(ForeignKey("epg_events.id"))
+    # Snapshot fields so a like survives EPG cleanup
+    title: Mapped[str] = mapped_column(Text, nullable=False)
+    channel_name: Mapped[str | None] = mapped_column(String(256))
+    genre: Mapped[str | None] = mapped_column(String(64))
+    created_at: Mapped[datetime] = mapped_column(nullable=False)
+
+
 class Translation(Base):
     __tablename__ = "translations"
 

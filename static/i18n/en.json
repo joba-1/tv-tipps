@@ -53,6 +53,10 @@
   "btn.prefs_save": "Save",
   "msg.prefs_saved": "✓ Preferences saved for {name}",
   "msg.prefs_error": "⚠️ Save failed",
+  "btn.like": "👍 Save",
+  "btn.unlike": "👍 Saved",
+  "label.epg_search": "Search EPG…",
+  "msg.epg_search_no_results": "No matches for “{q}”.",
   "label.power_method": "{method}",
 
   "page.tips.title": "★ Tips",

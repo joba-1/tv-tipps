@@ -57,13 +57,14 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title="tv-tips", lifespan=lifespan)
 
 # Routers
-from app.routers import now_next, epg, admin, recommendations, remote, i18n  # noqa: E402
+from app.routers import now_next, epg, admin, recommendations, remote, i18n, likes  # noqa: E402
 app.include_router(now_next.router)
 app.include_router(epg.router)
 app.include_router(admin.router)
 app.include_router(recommendations.router)
 app.include_router(remote.router)
 app.include_router(i18n.router)
+app.include_router(likes.router)
 
 # Static files
 static_dir = Path("static")

@@ -35,6 +35,11 @@ function tvApp() {
     epgEvents: [],
     loadingEpg: false,
     epgContext: "tonight",
+    epgSearchQuery: "",
+    _epgSearchTimer: null,
+
+    // Likes
+    likedIds: new Set(),
 
     // Receivers
     receivers: [],
@@ -128,6 +133,8 @@ function tvApp() {
 
       const cookieReceiver = this._getCookie("tv_tips_receiver");
       this.selectedReceiver = this.receivers.find(r => r.name === cookieReceiver) || null;
+
+      await this.loadLikes();
 
       route();
 
@@ -256,7 +263,62 @@ function tvApp() {
 
     setEpgContext(ctx) {
       this.epgContext = ctx;
+      this.epgSearchQuery = "";
       this.loadEpg();
+    },
+
+    debouncedEpgSearch() {
+      clearTimeout(this._epgSearchTimer);
+      const q = this.epgSearchQuery.trim();
+      this._epgSearchTimer = setTimeout(() => {
+        if (q.length >= 2) this.searchEpg();
+        else this.loadEpg();
+      }, 300);
+    },
+
+    async searchEpg() {
+      this.loadingEpg = true;
+      try {
+        const q = encodeURIComponent(this.epgSearchQuery.trim());
+        const res = await fetch(`/api/epg/search?q=${q}`, { credentials: "include" });
+        if (!res.ok) throw new Error(res.statusText);
+        this.epgEvents = await res.json();
+      } catch (e) {
+        console.error("searchEpg failed:", e);
+      } finally {
+        this.loadingEpg = false;
+      }
+    },
+
+    // ── Likes ───────────────────────────────────────────────────────────────
+
+    async loadLikes() {
+      try {
+        const res = await fetch("/api/likes", { credentials: "include" });
+        if (!res.ok) { this.likedIds = new Set(); return; }
+        const data = await res.json();
+        this.likedIds = new Set(data.filter(l => l.epg_event_id).map(l => l.epg_event_id));
+      } catch (_) { this.likedIds = new Set(); }
+    },
+
+    async toggleLike(eventId) {
+      if (!eventId) return;
+      try {
+        const res = await fetch("/api/likes/toggle", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          credentials: "include",
+          body: JSON.stringify({ epg_event_id: eventId }),
+        });
+        if (!res.ok) return;
+        const data = await res.json();
+        // Reassign to trigger Alpine reactivity
+        const next = new Set(this.likedIds);
+        if (data.liked) next.add(eventId); else next.delete(eventId);
+        this.likedIds = next;
+        // Invalidate cached recs so the next view uses the new signal
+        this.recsData = null;
+      } catch (_) {}
     },
 
     // ── Admin ────────────────────────────────────────────────────────────────
@@ -430,6 +492,7 @@ function tvApp() {
       this.currentUser = this.users.find(u => u.slug === slug) || this.users[0];
       document.cookie = `tv_tips_user=${slug}; path=/; max-age=31536000; SameSite=Lax`;
       this.recsData = null;
+      await this.loadLikes();
       if (this.page === "recs") await this.loadRecs();
       if (this.page === "now")  await this.loadNowNext();
       if (this.page === "epg")  await this.loadEpg();

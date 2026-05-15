@@ -199,6 +199,10 @@
               x-text="t('btn.refresh')"></button>
     </div>
 
+    <input type="search" class="epg-search-input"
+           x-model="epgSearchQuery" @input="debouncedEpgSearch()"
+           :placeholder="t('label.epg_search')">
+
     <div x-show="loadingEpg" aria-busy="true" class="loading-center"
          x-text="t('msg.loading_epg')"></div>
 
@@ -212,7 +216,9 @@
           <div class="epg-desc"    x-text="ev.short_desc || ev.long_desc"></div>
         </article>
       </template>
-      <div x-show="epgEvents.length === 0 && !loadingEpg"
+      <div x-show="epgEvents.length === 0 && !loadingEpg && epgSearchQuery.trim().length >= 2"
+           class="empty-state" x-text="t('msg.epg_search_no_results', { q: epgSearchQuery })"></div>
+      <div x-show="epgEvents.length === 0 && !loadingEpg && epgSearchQuery.trim().length < 2"
            class="empty-state" x-text="t('msg.no_programmes')"></div>
     </div>
   </main>
@@ -352,6 +358,11 @@
       <p x-text="modalEvent?.long_desc"
          x-show="modalEvent?.long_desc && modalEvent?.long_desc !== modalEvent?.short_desc"></p>
       <p x-show="modalEvent?.reason" class="modal-reason" x-text="modalEvent?.reason"></p>
+      <footer class="modal-footer" x-show="modalEvent?.id">
+        <button :class="likedIds.has(modalEvent?.id) ? 'like-btn liked' : 'like-btn outline'"
+                @click="toggleLike(modalEvent?.id)"
+                x-text="likedIds.has(modalEvent?.id) ? t('btn.unlike') : t('btn.like')"></button>
+      </footer>
     </article>
   </dialog>
 

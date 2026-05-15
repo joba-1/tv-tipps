@@ -53,6 +53,10 @@
   "btn.prefs_save": "Speichern",
   "msg.prefs_saved": "✓ Vorlieben für {name} gespeichert",
   "msg.prefs_error": "⚠️ Speichern fehlgeschlagen",
+  "btn.like": "👍 Merken",
+  "btn.unlike": "👍 Gemerkt",
+  "label.epg_search": "Suche im EPG…",
+  "msg.epg_search_no_results": "Keine Treffer für „{q}“.",
   "label.power_method": "{method}",
 
   "page.tips.title": "★ Tips",
