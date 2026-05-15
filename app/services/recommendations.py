@@ -197,7 +197,7 @@ NUTZERPROFIL ({profile.get('session_count', 0)} Sitzungen, letzte 30 Tage):
 - Häufigste Sender: {channels_str or 'unbekannt'}
 - Ø Sehdauer: {profile.get('avg_duration_min', 0):.0f} min
 
-EXPLIZIT GEMERKT (👍 markiert, starkes positives Signal):
+POSITIV BEWERTET (👍 vom Nutzer, starkes positives Signal):
 {likes_str}
 
 LETZTE SEHHISTORIE:
