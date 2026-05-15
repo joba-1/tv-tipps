@@ -129,6 +129,14 @@ EOF
     chown "root:$SERVICE_USER" "$ENV_FILE"
 else
     echo "--> Config file already exists — skipping (edit $ENV_FILE to change settings)"
+    # Warn if DB_PATH is still a relative path (common when migrating from a dev .env)
+    existing_db=$(grep -E '^DB_PATH=' "$ENV_FILE" | cut -d= -f2-)
+    if [[ -n "$existing_db" && "$existing_db" != /* ]]; then
+        echo "WARNING: DB_PATH='$existing_db' is a relative path."
+        echo "         The service WorkingDirectory is $APP_DIR, so the DB will be"
+        echo "         created there, not in $DATA_DIR."
+        echo "         Fix: update DB_PATH=$DATA_DIR/tv_tips.db in $ENV_FILE"
+    fi
 fi
 
 # ── systemd service ───────────────────────────────────────────────────────────
