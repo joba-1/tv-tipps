@@ -121,9 +121,13 @@ class EnigmaClient:
             async with httpx.AsyncClient(timeout=httpx.Timeout(10.0)) as client:
                 r = await client.get(
                     f"{self.base_url}/grab",
-                    params={"format": "jpg", "n": "0"},
+                    params={"format": "jpg"},
                 )
                 r.raise_for_status()
+                ct = r.headers.get("content-type", "")
+                if not ct.startswith("image/"):
+                    log.warning("enigma.screenshot_not_image", ip=self.ip, content_type=ct)
+                    return None
                 return r.content
         except (httpx.RequestError, httpx.HTTPStatusError) as e:
             log.warning("enigma.screenshot_failed", ip=self.ip, error=str(e))

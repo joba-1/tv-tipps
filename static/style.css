@@ -449,18 +449,26 @@ button.close { background: none; border: none; font-size: 1.2rem; padding: 0; cu
   border: 1px solid var(--pico-muted-border-color);
   border-radius: 8px;
   overflow: hidden;
-  background: #000;
-  min-height: 56px;
+  background: var(--pico-card-sectioning-background-color);
+}
+.remote-screenshot-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.25rem 0.5rem;
+  border-bottom: 1px solid var(--pico-muted-border-color);
+}
+.remote-screenshot-label { color: var(--pico-muted-color); }
+.remote-screenshot-label.muted { opacity: 0.5; }
+.remote-shot-refresh {
+  padding: 0.1rem 0.5rem !important;
+  font-size: 0.8rem;
+  margin: 0;
+  line-height: 1.4 !important;
 }
 .remote-screenshot {
   width: 100%;
   display: block;
-}
-.remote-screenshot-placeholder {
-  text-align: center;
-  font-size: 2rem;
-  padding: 0.75rem;
-  color: var(--pico-muted-color);
 }
 
 .remote-feedback {

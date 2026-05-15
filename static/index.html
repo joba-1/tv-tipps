@@ -271,13 +271,6 @@
 
     <div class="remote-wrap">
 
-      <!-- Screenshot at top -->
-      <div class="remote-screenshot-wrap">
-        <img class="remote-screenshot" :src="remoteScreenshotUrl" alt="TV"
-             x-show="remoteScreenshotUrl" />
-        <div class="remote-screenshot-placeholder" x-show="!remoteScreenshotUrl">📺</div>
-      </div>
-
       <!-- Power row -->
       <div class="remote-power-row">
         <button class="outline remote-btn" @click="remoteOn()"       :disabled="remoteSending" x-text="t('btn.remote_on')"></button>
@@ -314,6 +307,18 @@
       <div class="remote-nav-row">
         <button class="outline remote-btn" @click="sendKey('menu')" :disabled="remoteSending">☰ Menu</button>
         <button class="outline remote-btn" @click="sendKey('back')" :disabled="remoteSending">↩ Back</button>
+      </div>
+
+      <!-- Screenshot feedback -->
+      <div class="remote-screenshot-wrap">
+        <div class="remote-screenshot-header">
+          <small class="remote-screenshot-label" x-show="remoteScreenshotUrl">📺 Live</small>
+          <small class="remote-screenshot-label muted" x-show="!remoteScreenshotUrl && !remoteScreenshotLoading">📺 –</small>
+          <button class="outline remote-btn remote-shot-refresh" @click="refreshScreenshot()"
+                  :aria-busy="remoteScreenshotLoading">↺</button>
+        </div>
+        <img class="remote-screenshot" :src="remoteScreenshotUrl" alt="TV"
+             x-show="remoteScreenshotUrl" />
       </div>
 
     </div><!-- /remote-wrap -->

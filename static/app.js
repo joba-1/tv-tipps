@@ -50,6 +50,7 @@ function tvApp() {
     remoteScreenshotUrl: "",
     _remoteScreenshotTimer: null,
     remoteSending: false,
+    remoteScreenshotLoading: false,
 
     // Modal
     modalOpen: false,
@@ -355,8 +356,20 @@ function tvApp() {
 
     refreshScreenshot() {
       const recv = this.selectedReceiver ? encodeURIComponent(this.selectedReceiver.name) : "";
-      this.remoteScreenshotUrl =
-        `/api/remote/screenshot?${recv ? "receiver=" + recv + "&" : ""}t=${Date.now()}`;
+      const url = `/api/remote/screenshot?${recv ? "receiver=" + recv + "&" : ""}t=${Date.now()}`;
+      this.remoteScreenshotLoading = true;
+      fetch(url)
+        .then(res => {
+          if (!res.ok) throw new Error(res.status);
+          return res.blob();
+        })
+        .then(blob => {
+          if (!blob.type.startsWith("image/")) throw new Error("not-image");
+          if (this.remoteScreenshotUrl.startsWith("blob:")) URL.revokeObjectURL(this.remoteScreenshotUrl);
+          this.remoteScreenshotUrl = URL.createObjectURL(blob);
+        })
+        .catch(() => { this.remoteScreenshotUrl = ""; })
+        .finally(() => { this.remoteScreenshotLoading = false; });
     },
 
     _startScreenshotPoll() {
