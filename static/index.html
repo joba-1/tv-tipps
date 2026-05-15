@@ -17,13 +17,13 @@
       <li><strong>📺 tv-tips</strong></li>
     </ul>
     <ul>
-      <li><a href="#recs" :class="page==='recs' && 'active'">★ Tips</a></li>
-      <li><a href="#now"  :class="page==='now'  && 'active'">Now&amp;Next</a></li>
-      <li><a href="#epg"  :class="page==='epg'  && 'active'">EPG</a></li>
-      <li><a href="#admin" :class="page==='admin' && 'active'">Admin</a></li>
+      <li><a href="#recs"  :class="page==='recs'  && 'active'" x-text="t('nav.tips')"></a></li>
+      <li><a href="#now"   :class="page==='now'   && 'active'" x-text="t('nav.now_next')"></a></li>
+      <li><a href="#epg"   :class="page==='epg'   && 'active'" x-text="t('nav.epg')"></a></li>
+      <li><a href="#admin" :class="page==='admin'  && 'active'" x-text="t('nav.admin')"></a></li>
       <li>
         <details class="dropdown">
-          <summary x-text="currentUser ? currentUser.name : 'User'"></summary>
+          <summary x-text="currentUser ? currentUser.name : t('nav.user_label')"></summary>
           <ul>
             <template x-for="u in users" :key="u.slug">
               <li><a href="#" @click.prevent="setUser(u.slug)" x-text="u.name"
@@ -44,60 +44,74 @@
     </ul>
   </nav>
 
+  <!-- i18n pending banner -->
+  <div class="container-fluid i18n-pending-banner" x-show="i18nStatus === 'pending'" x-transition
+       x-text="t('msg.translation_pending')"></div>
+
   <!-- Stale data banner -->
-  <div class="container-fluid stale-banner" x-show="staleBanner" x-transition>
-    ⚠️ Zeige gecachte Daten — Receiver offline oder EPG veraltet.
-  </div>
+  <div class="container-fluid stale-banner" x-show="staleBanner" x-transition
+       x-text="t('msg.stale')"></div>
 
   <!-- ★ Recommendations page (default) -->
   <main class="container" x-show="page==='recs'">
     <div class="page-header">
-      <h2>★ Tips</h2>
+      <h2 x-text="t('page.tips.title')"></h2>
       <div class="context-tabs" role="group">
-        <button :class="recsContext==='now'   ? '' : 'outline'" @click="setRecsContext('now')">Jetzt</button>
-        <button :class="recsContext==='next'  ? '' : 'outline'" @click="setRecsContext('next')">Als nächstes</button>
-        <button :class="recsContext==='prime' ? '' : 'outline'" @click="setRecsContext('prime')">Primetime</button>
-        <button :class="recsContext==='today' ? '' : 'outline'" @click="setRecsContext('today')">Heute</button>
+        <button :class="recsContext==='now'   ? '' : 'outline'" @click="setRecsContext('now')"
+                x-text="t('context.now')"></button>
+        <button :class="recsContext==='next'  ? '' : 'outline'" @click="setRecsContext('next')"
+                x-text="t('context.next')"></button>
+        <button :class="recsContext==='prime' ? '' : 'outline'" @click="setRecsContext('prime')"
+                x-text="t('context.prime')"></button>
+        <button :class="recsContext==='today' ? '' : 'outline'" @click="setRecsContext('today')"
+                x-text="t('context.today')"></button>
       </div>
-      <button class="outline" @click="loadRecs()" :aria-busy="loadingRecs">↺</button>
+      <button class="outline" @click="loadRecs()" :aria-busy="loadingRecs"
+              x-text="t('btn.refresh')"></button>
     </div>
 
-    <div x-show="recsData && recsData.cold_start" class="cold-start-banner">
-      Noch zu wenig Daten — zeige populäre Sendungen. Weiter schauen, damit Tips persönlicher werden!
-    </div>
+    <div x-show="recsData && recsData.cold_start" class="cold-start-banner"
+         x-text="t('msg.cold_start')"></div>
 
     <p x-show="recsData && recsData.taste_summary" class="taste-summary"
        x-text="recsData && recsData.taste_summary"></p>
 
-    <div x-show="loadingRecs" aria-busy="true" class="loading-center">Tips werden geladen…</div>
+    <div x-show="loadingRecs" aria-busy="true" class="loading-center"
+         x-text="t('msg.loading_tips')"></div>
 
     <div class="rec-list" x-show="!loadingRecs">
-      <template x-for="(rec, idx) in (recsData && recsData.recommendations || [])" :key="rec.sref + idx">
+      <template x-for="(rec, idx) in (recsData && recsData.recommendations || [])"
+                :key="rec.sref + idx">
         <article class="rec-card">
           <header>
-            <div class="rec-rank" x-text="'#' + (idx+1)"></div>
+            <div class="rec-rank" x-text="t('label.rank', { n: idx+1 })"></div>
             <div class="rec-channel" x-text="rec.channel_name"></div>
-            <div class="rec-time" x-text="rec.start_time.slice(11,16) + ' – ' + rec.end_time.slice(11,16)"></div>
+            <div class="rec-time"
+                 x-text="rec.start_time.slice(11,16) + ' – ' + rec.end_time.slice(11,16)"></div>
           </header>
           <div class="rec-title" x-text="rec.title"></div>
           <div class="rec-meta">
-            <span class="rec-genre" x-show="rec.genre" x-text="rec.genre"></span>
-            <div class="rec-score-bar" :title="'match ' + Math.round(rec.match_score*100) + '%'">
-              <div class="rec-score-fill" :style="'width:' + (rec.match_score*100) + '%'"
-                   :class="rec.match_score >= 0.75 ? 'high' : rec.match_score >= 0.5 ? 'mid' : 'low'"></div>
+            <span class="rec-genre" x-show="rec.genre" x-text="tGenre(rec.genre)"></span>
+            <div class="rec-score-bar"
+                 :title="t('label.match', { pct: Math.round(rec.match_score*100) })">
+              <div class="rec-score-fill"
+                   :style="'width:' + (rec.match_score*100) + '%'"
+                   :class="rec.match_score >= 0.75 ? 'high' : rec.match_score >= 0.5 ? 'mid' : 'low'">
+              </div>
             </div>
-            <span class="rec-score-label" x-text="Math.round(rec.match_score*100) + '%'"></span>
+            <span class="rec-score-label"
+                  x-text="t('label.match', { pct: Math.round(rec.match_score*100) })"></span>
           </div>
           <div class="rec-reason" x-text="rec.reason"></div>
           <footer>
-            <button @click="watchChannel(rec.sref)" class="watch-btn">▶ Watch</button>
+            <button @click="watchChannel(rec.sref)" class="watch-btn"
+                    x-text="t('btn.watch')"></button>
           </footer>
         </article>
       </template>
-      <div x-show="(!recsData || !recsData.recommendations || recsData.recommendations.length===0) && !loadingRecs"
-           class="empty-state">
-        Keine Empfehlungen gefunden. Receiver online? EPG aktuell?
-      </div>
+      <div x-show="(!recsData || !recsData.recommendations || recsData.recommendations.length===0)
+                   && !loadingRecs"
+           class="empty-state" x-text="t('msg.no_recs')"></div>
     </div>
 
     <!-- Zap feedback toast -->
@@ -107,12 +121,14 @@
   <!-- Now & Next page -->
   <main class="container" x-show="page==='now'">
     <div class="page-header">
-      <h2>Now &amp; Next</h2>
-      <small x-text="'Stand ' + lastRefresh"></small>
-      <button class="outline" @click="loadNowNext()" :aria-busy="loadingNow">↺</button>
+      <h2 x-text="t('page.now.title')"></h2>
+      <small x-text="t('label.updated', { time: lastRefresh })"></small>
+      <button class="outline" @click="loadNowNext()" :aria-busy="loadingNow"
+              x-text="t('btn.refresh')"></button>
     </div>
 
-    <div x-show="loadingNow" aria-busy="true" class="loading-center">Lade EPG…</div>
+    <div x-show="loadingNow" aria-busy="true" class="loading-center"
+         x-text="t('msg.loading_epg')"></div>
 
     <div class="channel-grid" x-show="!loadingNow">
       <template x-for="ch in nowNext" :key="ch.channel_id">
@@ -123,17 +139,20 @@
             <strong x-text="ch.channel_name"></strong>
           </header>
 
-          <div x-show="ch.now" @click="showDetail(ch.now, ch.channel_name)" class="program now-program" role="button">
+          <div x-show="ch.now" @click="showDetail(ch.now, ch.channel_name)"
+               class="program now-program" role="button">
             <div class="program-title" x-text="ch.now?.title"></div>
             <div class="progress-bar">
-              <div class="progress-fill" :style="'width:' + (ch.now?.progress_pct || 0) + '%'"></div>
+              <div class="progress-fill"
+                   :style="'width:' + (ch.now?.progress_pct || 0) + '%'"></div>
             </div>
             <small x-text="formatTime(ch.now?.start_time) + ' – ' + formatTime(ch.now?.end_time)"></small>
           </div>
-          <div x-show="!ch.now" class="no-data">Kein aktuelles Programm</div>
+          <div x-show="!ch.now" class="no-data" x-text="t('msg.no_current')"></div>
 
-          <div x-show="ch.next" class="program next-program" @click="showDetail(ch.next, ch.channel_name)" role="button">
-            <span class="next-label">Danach: </span>
+          <div x-show="ch.next" class="program next-program"
+               @click="showDetail(ch.next, ch.channel_name)" role="button">
+            <span class="next-label" x-text="t('label.next_prefix')"></span>
             <span x-text="ch.next?.title"></span>
             <small x-text="' · ' + formatTime(ch.next?.start_time)"></small>
           </div>
@@ -141,45 +160,54 @@
       </template>
     </div>
 
-    <div x-show="!loadingNow && nowNext.length === 0" class="empty-state">
-      Keine Sender gefunden. Receiver online? Daten aktualisieren.
-    </div>
+    <div x-show="!loadingNow && nowNext.length === 0"
+         class="empty-state" x-text="t('msg.no_channels')"></div>
   </main>
 
   <!-- EPG range page -->
   <main class="container" x-show="page==='epg'">
     <div class="page-header">
-      <h2>EPG</h2>
+      <h2 x-text="t('page.epg.title')"></h2>
       <div class="context-tabs" role="group">
-        <button :class="epgContext==='2h'      ? '' : 'outline'" @click="setEpgContext('2h')">+2h</button>
-        <button :class="epgContext==='4h'      ? '' : 'outline'" @click="setEpgContext('4h')">+4h</button>
-        <button :class="epgContext==='tonight' ? '' : 'outline'" @click="setEpgContext('tonight')">Heute Abend</button>
+        <button :class="epgContext==='2h'      ? '' : 'outline'" @click="setEpgContext('2h')"
+                x-text="t('label.epg_2h')"></button>
+        <button :class="epgContext==='4h'      ? '' : 'outline'" @click="setEpgContext('4h')"
+                x-text="t('label.epg_4h')"></button>
+        <button :class="epgContext==='tonight' ? '' : 'outline'" @click="setEpgContext('tonight')"
+                x-text="t('label.epg_tonight')"></button>
       </div>
-      <button class="outline" @click="loadEpg()" :aria-busy="loadingEpg">↺</button>
+      <button class="outline" @click="loadEpg()" :aria-busy="loadingEpg"
+              x-text="t('btn.refresh')"></button>
     </div>
 
-    <div x-show="loadingEpg" aria-busy="true" class="loading-center">Lade EPG…</div>
+    <div x-show="loadingEpg" aria-busy="true" class="loading-center"
+         x-text="t('msg.loading_epg')"></div>
 
     <div x-show="!loadingEpg" class="epg-list">
       <template x-for="ev in epgEvents" :key="ev.id">
         <article class="epg-row" @click="showDetail(ev, ev.channel_name)" role="button">
-          <div class="epg-time"    x-text="formatTime(ev.start_time) + ' – ' + formatTime(ev.end_time)"></div>
+          <div class="epg-time"
+               x-text="formatTime(ev.start_time) + ' – ' + formatTime(ev.end_time)"></div>
           <div class="epg-channel" x-text="ev.channel_name"></div>
           <div class="epg-title"   x-text="ev.title"></div>
           <div class="epg-desc"    x-text="ev.short_desc"></div>
         </article>
       </template>
-      <div x-show="epgEvents.length === 0 && !loadingEpg" class="empty-state">Keine Sendungen gefunden.</div>
+      <div x-show="epgEvents.length === 0 && !loadingEpg"
+           class="empty-state" x-text="t('msg.no_programmes')"></div>
     </div>
   </main>
 
   <!-- Admin page -->
   <main class="container" x-show="page==='admin'">
     <div class="page-header">
-      <h2>Admin</h2>
-      <button class="outline" @click="adminRefresh('all')" :aria-busy="adminRefreshing">↺ Alle</button>
-      <button class="outline" @click="adminRefresh('channels')">Sender</button>
-      <button class="outline" @click="adminRefresh('epg_full')">EPG voll</button>
+      <h2 x-text="t('page.admin.title')"></h2>
+      <button class="outline" @click="adminRefresh('all')" :aria-busy="adminRefreshing"
+              x-text="t('btn.refresh_all')"></button>
+      <button class="outline" @click="adminRefresh('channels')"
+              x-text="t('btn.refresh_channels')"></button>
+      <button class="outline" @click="adminRefresh('epg_full')"
+              x-text="t('btn.refresh_epg')"></button>
     </div>
     <p x-show="adminMsg" x-text="adminMsg" class="admin-msg"></p>
 
@@ -196,24 +224,24 @@
           </header>
           <div class="admin-receiver-flags">
             <span x-show="r.has_genre" class="flag-badge">genre</span>
-            <span x-text="'prio ' + r.priority" class="flag-badge"></span>
+            <span x-text="t('label.prio', { n: r.priority })" class="flag-badge"></span>
             <span x-text="r.power_method" class="flag-badge"></span>
           </div>
           <footer>
-            <button class="outline" @click="receiverPower(r.name, 'wake')" x-show="r.power_method !== 'none'">
-              ⚡ Wake
-            </button>
-            <button class="outline secondary" @click="receiverPower(r.name, 'sleep')" x-show="r.power_method !== 'none'">
-              💤 Sleep
-            </button>
+            <button class="outline" @click="receiverPower(r.name, 'wake')"
+                    x-show="r.power_method !== 'none'"
+                    x-text="t('btn.wake')"></button>
+            <button class="outline secondary" @click="receiverPower(r.name, 'sleep')"
+                    x-show="r.power_method !== 'none'"
+                    x-text="t('btn.sleep')"></button>
           </footer>
         </article>
       </template>
     </div>
 
     <div class="admin-stats" x-show="adminStatus">
-      <p x-text="'Sender in DB: ' + (adminStatus && adminStatus.db_channel_count)"></p>
-      <p x-text="'EPG-Events in DB: ' + (adminStatus && adminStatus.db_epg_event_count)"></p>
+      <p x-text="t('label.admin_channels', { n: adminStatus && adminStatus.db_channel_count })"></p>
+      <p x-text="t('label.admin_epg_events', { n: adminStatus && adminStatus.db_epg_event_count })"></p>
     </div>
   </main>
 
@@ -221,7 +249,8 @@
   <dialog :open="modalOpen" @click.self="modalOpen=false">
     <article>
       <header>
-        <button class="close" @click="modalOpen=false" aria-label="Schließen">✕</button>
+        <button class="close" @click="modalOpen=false"
+                :aria-label="t('btn.close')">✕</button>
         <strong x-text="modalChannel"></strong>
       </header>
       <h3 x-text="modalEvent?.title"></h3>

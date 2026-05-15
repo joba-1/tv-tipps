@@ -169,3 +169,13 @@ class RecommendationCache(Base):
     valid_until: Mapped[datetime] = mapped_column(nullable=False)
     prompt_hash: Mapped[str] = mapped_column(String(64), nullable=False)
     response: Mapped[str] = mapped_column(Text, nullable=False)
+
+
+class Translation(Base):
+    __tablename__ = "translations"
+
+    lang: Mapped[str] = mapped_column(String(8), primary_key=True)
+    key: Mapped[str] = mapped_column(String(128), primary_key=True)
+    value: Mapped[str] = mapped_column(Text, nullable=False)
+    source: Mapped[str] = mapped_column(String(16), nullable=False)  # "manual" | "ai"
+    generated_at: Mapped[datetime] = mapped_column(nullable=False)

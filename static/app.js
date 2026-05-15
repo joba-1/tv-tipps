@@ -5,6 +5,12 @@ function tvApp() {
     // Routing
     page: "recs",
 
+    // i18n
+    lang: "de",
+    i18nStrings: {},
+    i18nStatus: "ready",
+    _i18nPollTimer: null,
+
     // Users
     users: [],
     currentUser: null,
@@ -40,7 +46,55 @@ function tvApp() {
     modalEvent: null,
     modalChannel: "",
 
+    // ── i18n helpers ────────────────────────────────────────────────────────
+
+    t(key, params = {}) {
+      let s = this.i18nStrings[key] || key;
+      for (const [k, v] of Object.entries(params)) {
+        s = s.replace(`{${k}}`, v);
+      }
+      return s;
+    },
+
+    tGenre(genreDe) {
+      if (!genreDe) return "";
+      const normalized = genreDe.toLowerCase().trim().replace(/\s+/g, "_");
+      const key = "genre." + normalized;
+      return this.i18nStrings[key] || genreDe;
+    },
+
+    async _detectLang() {
+      const cookie = this._getCookie("tv_tips_lang");
+      if (cookie) return cookie;
+      const browser = (navigator.language || "de").split("-")[0].toLowerCase();
+      document.cookie = `tv_tips_lang=${browser}; path=/; max-age=31536000; SameSite=Lax`;
+      return browser;
+    },
+
+    async _loadI18n() {
+      try {
+        const res = await fetch(`/api/i18n/${this.lang}`);
+        if (!res.ok) return;
+        const data = await res.json();
+        this.i18nStrings = data.strings;
+        this.i18nStatus = data.status;
+        if (data.status === "pending" && !this._i18nPollTimer) {
+          this._i18nPollTimer = setInterval(() => this._loadI18n(), 15_000);
+        }
+        if (data.status === "ready" && this._i18nPollTimer) {
+          clearInterval(this._i18nPollTimer);
+          this._i18nPollTimer = null;
+        }
+      } catch (_) {}
+    },
+
+    // ── Init ────────────────────────────────────────────────────────────────
+
     async init() {
+      // Language first so the first render is already localised
+      this.lang = await this._detectLang();
+      await this._loadI18n();
+
       const route = () => {
         const hash = window.location.hash.replace(/^#\/?/, "");
         this.page = hash || "recs";
@@ -53,13 +107,11 @@ function tvApp() {
 
       await this.loadReceivers();
 
-      // Restore user from cookie; fall back to first from API
       const cookieUser = this._getCookie("tv_tips_user");
       this.currentUser = this.users.find(u => u.slug === cookieUser) || this.users[0] || null;
 
       route();
 
-      // Periodic refresh
       setInterval(() => this.loadReceivers(), 30_000);
       setInterval(() => {
         if (this.page === "recs") this.loadRecs();
@@ -67,12 +119,13 @@ function tvApp() {
       }, 120_000);
     },
 
+    // ── Receivers / users ───────────────────────────────────────────────────
+
     async loadReceivers() {
       try {
         const res = await fetch("/api/receivers");
         if (!res.ok) return;
         this.receivers = await res.json();
-        // Also fetch users if not loaded yet
         if (this.users.length === 0) {
           const ur = await fetch("/api/users");
           if (ur.ok) {
@@ -84,16 +137,22 @@ function tvApp() {
           }
         }
         const anyOffline = this.receivers.some(r => !r.online || r.power_state !== "on");
-        if (anyOffline && (this.nowNext.length > 0 || (this.recsData && this.recsData.recommendations && this.recsData.recommendations.length > 0))) {
+        if (anyOffline && (this.nowNext.length > 0 ||
+            (this.recsData?.recommendations?.length > 0))) {
           this.staleBanner = true;
         }
       } catch (_) {}
     },
 
+    // ── Recommendations ─────────────────────────────────────────────────────
+
     async loadRecs() {
       this.loadingRecs = true;
       try {
-        const res = await fetch(`/api/recommendations?context=${this.recsContext}`, { credentials: "include" });
+        const res = await fetch(
+          `/api/recommendations?context=${this.recsContext}`,
+          { credentials: "include" }
+        );
         if (!res.ok) throw new Error(res.statusText);
         this.recsData = await res.json();
       } catch (e) {
@@ -118,12 +177,15 @@ function tvApp() {
         });
         const data = await res.json();
         if (data.ok) {
-          this._toast(data.woke ? `⚡ ${data.receiver_name} aufgeweckt & umgeschaltet` : `▶ Auf ${data.receiver_name} umgeschaltet`);
+          this._toast(data.woke
+            ? this.t("msg.zap_woke", { receiver: data.receiver_name })
+            : this.t("msg.zap_ok",   { receiver: data.receiver_name })
+          );
         } else {
-          this._toast("⚠️ Zap fehlgeschlagen");
+          this._toast(this.t("msg.zap_fail"));
         }
-      } catch (e) {
-        this._toast("⚠️ Verbindungsfehler");
+      } catch (_) {
+        this._toast(this.t("msg.connect_error"));
       }
     },
 
@@ -133,6 +195,8 @@ function tvApp() {
       this._zapTimer = setTimeout(() => { this.zapToast = ""; }, 3500);
     },
 
+    // ── Now & Next ──────────────────────────────────────────────────────────
+
     async loadNowNext() {
       this.loadingNow = true;
       try {
@@ -140,13 +204,18 @@ function tvApp() {
         if (!res.ok) throw new Error(res.statusText);
         this.nowNext = await res.json();
         this.staleBanner = this.nowNext.some(ch => ch.stale);
-        this.lastRefresh = new Date().toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" });
+        this.lastRefresh = new Date().toLocaleTimeString(
+          this.lang + "-" + this.lang.toUpperCase(),
+          { hour: "2-digit", minute: "2-digit" }
+        );
       } catch (e) {
         console.error("loadNowNext failed:", e);
       } finally {
         this.loadingNow = false;
       }
     },
+
+    // ── EPG ─────────────────────────────────────────────────────────────────
 
     async loadEpg() {
       this.loadingEpg = true;
@@ -170,6 +239,8 @@ function tvApp() {
       this.loadEpg();
     },
 
+    // ── Admin ────────────────────────────────────────────────────────────────
+
     async loadAdminStatus() {
       try {
         const res = await fetch("/api/admin/status");
@@ -183,12 +254,17 @@ function tvApp() {
       this.adminRefreshing = true;
       this.adminMsg = "";
       try {
-        const res = await fetch(`/api/admin/refresh?target=${target}`, { method: "POST" });
+        const res = await fetch(
+          `/api/admin/refresh?target=${target}`,
+          { method: "POST" }
+        );
         const data = await res.json();
-        this.adminMsg = data.ok ? `✓ ${target} aktualisiert` : `⚠️ Fehler`;
+        this.adminMsg = data.ok
+          ? this.t("msg.refresh_ok", { target })
+          : this.t("msg.refresh_error");
         await this.loadAdminStatus();
       } catch (_) {
-        this.adminMsg = "⚠️ Verbindungsfehler";
+        this.adminMsg = this.t("msg.connect_error");
       } finally {
         this.adminRefreshing = false;
       }
@@ -196,25 +272,33 @@ function tvApp() {
 
     async receiverPower(name, action) {
       try {
-        const res = await fetch(`/api/admin/power?receiver=${encodeURIComponent(name)}&action=${action}`, { method: "POST" });
+        const res = await fetch(
+          `/api/admin/power?receiver=${encodeURIComponent(name)}&action=${action}`,
+          { method: "POST" }
+        );
         const data = await res.json();
         this.adminMsg = data.ok
-          ? `✓ ${name}: ${action === "wake" ? "aufgeweckt" : "schlafen gelegt"} (${data.power_method})`
-          : `⚠️ ${data.error || "Fehler"}`;
+          ? this.t(action === "wake" ? "msg.power_wake_ok" : "msg.power_sleep_ok",
+                   { name, method: data.power_method })
+          : this.t("msg.power_error", { error: data.error || "?" });
         setTimeout(() => this.loadReceivers(), 3000);
       } catch (_) {
-        this.adminMsg = "⚠️ Verbindungsfehler";
+        this.adminMsg = this.t("msg.connect_error");
       }
     },
+
+    // ── User switching ───────────────────────────────────────────────────────
 
     async setUser(slug) {
       this.currentUser = this.users.find(u => u.slug === slug) || this.users[0];
       document.cookie = `tv_tips_user=${slug}; path=/; max-age=31536000; SameSite=Lax`;
       this.recsData = null;
-      if (this.page === "recs")  await this.loadRecs();
-      if (this.page === "now")   await this.loadNowNext();
-      if (this.page === "epg")   await this.loadEpg();
+      if (this.page === "recs") await this.loadRecs();
+      if (this.page === "now")  await this.loadNowNext();
+      if (this.page === "epg")  await this.loadEpg();
     },
+
+    // ── Helpers ──────────────────────────────────────────────────────────────
 
     showDetail(event, channelName) {
       this.modalEvent = event;
@@ -233,11 +317,13 @@ function tvApp() {
     formatTime(isoStr) {
       if (!isoStr) return "";
       const d = new Date(isoStr + "Z");
-      return d.toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" });
+      return d.toLocaleTimeString(this.lang, { hour: "2-digit", minute: "2-digit" });
     },
 
     _getCookie(name) {
-      const match = document.cookie.match(new RegExp("(?:^|; )" + name + "=([^;]*)"));
+      const match = document.cookie.match(
+        new RegExp("(?:^|; )" + name + "=([^;]*)")
+      );
       return match ? decodeURIComponent(match[1]) : null;
     },
   };
