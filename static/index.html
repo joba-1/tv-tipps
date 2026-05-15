@@ -312,13 +312,12 @@
       <!-- Screenshot feedback -->
       <div class="remote-screenshot-wrap">
         <div class="remote-screenshot-header">
-          <small class="remote-screenshot-label" x-show="remoteScreenshotUrl">📺 Live</small>
-          <small class="remote-screenshot-label muted" x-show="!remoteScreenshotUrl && !remoteScreenshotLoading">📺 –</small>
+          <small x-text="remoteScreenshotUrl ? '📺 Live' : (remoteScreenshotLoading ? '📺 …' : '📺 –')"></small>
           <button class="outline remote-btn remote-shot-refresh" @click="refreshScreenshot()"
                   :aria-busy="remoteScreenshotLoading">↺</button>
         </div>
-        <img class="remote-screenshot" :src="remoteScreenshotUrl" alt="TV"
-             x-show="remoteScreenshotUrl" />
+        <img class="remote-screenshot" :src="remoteScreenshotUrl" alt=""
+             style="display:block;width:100%" x-show="remoteScreenshotUrl" />
       </div>
 
     </div><!-- /remote-wrap -->

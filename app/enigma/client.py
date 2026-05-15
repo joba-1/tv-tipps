@@ -114,24 +114,23 @@ class EnigmaClient:
         return bool(data and data.get("result"))
 
     async def screenshot(self) -> bytes | None:
-        """Fetch a JPEG screenshot from the receiver via /grab."""
+        """Fetch a screenshot from the receiver via /grab (PNG default, JPEG fallback)."""
         if self.mock:
             return None
-        try:
-            async with httpx.AsyncClient(timeout=httpx.Timeout(10.0)) as client:
-                r = await client.get(
-                    f"{self.base_url}/grab",
-                    params={"format": "jpg"},
-                )
-                r.raise_for_status()
-                ct = r.headers.get("content-type", "")
-                if not ct.startswith("image/"):
-                    log.warning("enigma.screenshot_not_image", ip=self.ip, content_type=ct)
-                    return None
-                return r.content
-        except (httpx.RequestError, httpx.HTTPStatusError) as e:
-            log.warning("enigma.screenshot_failed", ip=self.ip, error=str(e))
-            return None
+        for params in ({}, {"format": "jpg"}):
+            try:
+                async with httpx.AsyncClient(timeout=httpx.Timeout(10.0)) as client:
+                    r = await client.get(f"{self.base_url}/grab", params=params)
+                    r.raise_for_status()
+                    ct = r.headers.get("content-type", "")
+                    if ct.startswith("image/"):
+                        log.info("enigma.screenshot_ok", ip=self.ip, params=params, ct=ct, size=len(r.content))
+                        return r.content
+                    log.warning("enigma.screenshot_not_image", ip=self.ip, params=params,
+                                content_type=ct, body_preview=r.text[:120])
+            except (httpx.RequestError, httpx.HTTPStatusError) as e:
+                log.warning("enigma.screenshot_failed", ip=self.ip, params=params, error=str(e))
+        return None
 
     def picon_url(self, picon_path: str) -> str:
         """Return full URL for a picon path from the receiver."""

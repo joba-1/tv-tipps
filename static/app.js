@@ -355,21 +355,14 @@ function tvApp() {
     },
 
     refreshScreenshot() {
+      if (this.remoteScreenshotLoading) return;
       const recv = this.selectedReceiver ? encodeURIComponent(this.selectedReceiver.name) : "";
       const url = `/api/remote/screenshot?${recv ? "receiver=" + recv + "&" : ""}t=${Date.now()}`;
       this.remoteScreenshotLoading = true;
-      fetch(url)
-        .then(res => {
-          if (!res.ok) throw new Error(res.status);
-          return res.blob();
-        })
-        .then(blob => {
-          if (!blob.type.startsWith("image/")) throw new Error("not-image");
-          if (this.remoteScreenshotUrl.startsWith("blob:")) URL.revokeObjectURL(this.remoteScreenshotUrl);
-          this.remoteScreenshotUrl = URL.createObjectURL(blob);
-        })
-        .catch(() => { this.remoteScreenshotUrl = ""; })
-        .finally(() => { this.remoteScreenshotLoading = false; });
+      const img = new Image();
+      img.onload = () => { this.remoteScreenshotUrl = url; this.remoteScreenshotLoading = false; };
+      img.onerror = () => { this.remoteScreenshotUrl = ""; this.remoteScreenshotLoading = false; };
+      img.src = url;
     },
 
     _startScreenshotPoll() {
