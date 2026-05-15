@@ -382,51 +382,48 @@ button.close { background: none; border: none; font-size: 1.2rem; padding: 0; cu
 
 /* ---- Remote control ---- */
 .remote-wrap {
-  max-width: 380px;
+  max-width: 340px;
   margin: 0 auto;
   padding-bottom: 2rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.9rem;
 }
 
 .remote-power-row {
   display: flex;
   gap: 0.5rem;
-  margin-bottom: 1.25rem;
 }
 .remote-power-row .remote-btn { flex: 1; }
 
-.remote-body {
+/* Main 3-column area: Vol | D-pad | CH */
+.remote-mid {
   display: flex;
   gap: 1rem;
-  align-items: flex-start;
+  align-items: center;
+  justify-content: center;
 }
 
-.remote-col-left {
+.remote-vcol {
   display: flex;
   flex-direction: column;
   gap: 0.4rem;
-  min-width: 80px;
+  width: 68px;
+  flex-shrink: 0;
 }
 
-.remote-col-right {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  gap: 0.75rem;
+.remote-btn-spacer {
+  height: 2.6rem; /* matches button height so CH+/CH- align with VOL+/VOL- rows */
 }
 
-.remote-btn {
-  padding: 0.55rem 0.5rem !important;
-  font-size: 0.9rem;
-  margin: 0;
-  text-align: center;
-  min-width: 0;
-}
-
+/* D-pad cross grid */
 .remote-dpad {
   display: grid;
-  grid-template-columns: 1fr 1fr 1fr;
-  grid-template-rows: 1fr 1fr 1fr;
+  grid-template-columns: repeat(3, 1fr);
+  grid-template-rows: repeat(3, 1fr);
   gap: 0.35rem;
+  width: 140px;
+  flex-shrink: 0;
 }
 .dpad-up    { grid-column: 2; grid-row: 1; }
 .dpad-left  { grid-column: 1; grid-row: 2; }
@@ -436,19 +433,24 @@ button.close { background: none; border: none; font-size: 1.2rem; padding: 0; cu
 
 .remote-nav-row {
   display: flex;
-  gap: 0.4rem;
+  gap: 0.5rem;
 }
 .remote-nav-row .remote-btn { flex: 1; }
 
-.remote-spacer { height: 0.6rem; }
+.remote-btn {
+  padding: 0.55rem 0.4rem !important;
+  font-size: 0.88rem;
+  margin: 0;
+  text-align: center;
+  min-width: 0;
+}
 
 .remote-screenshot-wrap {
-  margin-top: 1.25rem;
   border: 1px solid var(--pico-muted-border-color);
   border-radius: 8px;
   overflow: hidden;
   background: #000;
-  min-height: 60px;
+  min-height: 56px;
 }
 .remote-screenshot {
   width: 100%;
@@ -457,7 +459,7 @@ button.close { background: none; border: none; font-size: 1.2rem; padding: 0; cu
 .remote-screenshot-placeholder {
   text-align: center;
   font-size: 2rem;
-  padding: 1rem;
+  padding: 0.75rem;
   color: var(--pico-muted-color);
 }
 

@@ -270,49 +270,52 @@
     </div>
 
     <div class="remote-wrap">
-      <!-- Power row -->
-      <div class="remote-power-row">
-        <button class="outline remote-btn" @click="remoteOn()"        :disabled="remoteSending" x-text="t('btn.remote_on')"></button>
-        <button class="outline remote-btn" @click="sendKey('power')"  :disabled="remoteSending">⏸ Standby</button>
-        <button class="outline secondary remote-btn" @click="remoteOff()" :disabled="remoteSending" x-text="t('btn.remote_off')"></button>
-      </div>
 
-      <!-- Vol/Ch + D-pad side by side -->
-      <div class="remote-body">
-
-        <!-- Left column: Volume + Channel -->
-        <div class="remote-col-left">
-          <button class="outline remote-btn" @click="sendKey('vol_up')" :disabled="remoteSending">VOL+</button>
-          <button class="outline remote-btn" @click="sendKey('mute')"   :disabled="remoteSending">🔇</button>
-          <button class="outline remote-btn" @click="sendKey('vol_dn')" :disabled="remoteSending">VOL−</button>
-          <div class="remote-spacer"></div>
-          <button class="outline remote-btn" @click="sendKey('ch_up')"  :disabled="remoteSending">CH+</button>
-          <button class="outline remote-btn" @click="sendKey('ch_dn')"  :disabled="remoteSending">CH−</button>
-        </div>
-
-        <!-- Right column: D-pad + Menu/Back -->
-        <div class="remote-col-right">
-          <div class="remote-dpad">
-            <button class="outline remote-btn dpad-up"    @click="sendKey('up')"    :disabled="remoteSending">▲</button>
-            <button class="outline remote-btn dpad-left"  @click="sendKey('left')"  :disabled="remoteSending">◀</button>
-            <button class="outline remote-btn dpad-ok"    @click="sendKey('ok')"    :disabled="remoteSending">OK</button>
-            <button class="outline remote-btn dpad-right" @click="sendKey('right')" :disabled="remoteSending">▶</button>
-            <button class="outline remote-btn dpad-down"  @click="sendKey('down')"  :disabled="remoteSending">▼</button>
-          </div>
-          <div class="remote-nav-row">
-            <button class="outline remote-btn" @click="sendKey('menu')" :disabled="remoteSending">☰ Menu</button>
-            <button class="outline remote-btn" @click="sendKey('back')" :disabled="remoteSending">↩</button>
-          </div>
-        </div>
-
-      </div><!-- /remote-body -->
-
-      <!-- Screenshot feedback -->
+      <!-- Screenshot at top -->
       <div class="remote-screenshot-wrap">
-        <img class="remote-screenshot" :src="remoteScreenshotUrl || ''" alt="TV"
+        <img class="remote-screenshot" :src="remoteScreenshotUrl" alt="TV"
              x-show="remoteScreenshotUrl" />
         <div class="remote-screenshot-placeholder" x-show="!remoteScreenshotUrl">📺</div>
       </div>
+
+      <!-- Power row -->
+      <div class="remote-power-row">
+        <button class="outline remote-btn" @click="remoteOn()"       :disabled="remoteSending" x-text="t('btn.remote_on')"></button>
+        <button class="outline remote-btn" @click="sendKey('power')" :disabled="remoteSending">⏸ Standby</button>
+        <button class="outline secondary remote-btn" @click="remoteOff()" :disabled="remoteSending" x-text="t('btn.remote_off')"></button>
+      </div>
+
+      <!-- Main: Vol | D-pad | CH -->
+      <div class="remote-mid">
+
+        <div class="remote-vcol">
+          <button class="outline remote-btn" @click="sendKey('vol_up')" :disabled="remoteSending">VOL+</button>
+          <button class="outline remote-btn" @click="sendKey('mute')"   :disabled="remoteSending">🔇</button>
+          <button class="outline remote-btn" @click="sendKey('vol_dn')" :disabled="remoteSending">VOL−</button>
+        </div>
+
+        <div class="remote-dpad">
+          <button class="outline remote-btn dpad-up"    @click="sendKey('up')"    :disabled="remoteSending">▲</button>
+          <button class="outline remote-btn dpad-left"  @click="sendKey('left')"  :disabled="remoteSending">◀</button>
+          <button class="outline remote-btn dpad-ok"    @click="sendKey('ok')"    :disabled="remoteSending">OK</button>
+          <button class="outline remote-btn dpad-right" @click="sendKey('right')" :disabled="remoteSending">▶</button>
+          <button class="outline remote-btn dpad-down"  @click="sendKey('down')"  :disabled="remoteSending">▼</button>
+        </div>
+
+        <div class="remote-vcol">
+          <button class="outline remote-btn" @click="sendKey('ch_up')" :disabled="remoteSending">CH+</button>
+          <div class="remote-btn-spacer"></div>
+          <button class="outline remote-btn" @click="sendKey('ch_dn')" :disabled="remoteSending">CH−</button>
+        </div>
+
+      </div>
+
+      <!-- Nav row -->
+      <div class="remote-nav-row">
+        <button class="outline remote-btn" @click="sendKey('menu')" :disabled="remoteSending">☰ Menu</button>
+        <button class="outline remote-btn" @click="sendKey('back')" :disabled="remoteSending">↩ Back</button>
+      </div>
+
     </div><!-- /remote-wrap -->
   </main>
 
