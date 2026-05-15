@@ -8,6 +8,18 @@ from app.schemas import AdminStatus, ReceiverStatus
 router = APIRouter()
 
 
+def _infer_power_state(online: bool, rcfg, receiver) -> str:
+    """Map online + power_method to a displayable state.
+    Online → trust the receiver's current state; offline → infer from power_method."""
+    if online:
+        return receiver.power_state if receiver else "unknown"
+    if rcfg.power_method == "intertechno":
+        return "off"
+    if rcfg.power_method == "wol":
+        return "standby"
+    return receiver.power_state if receiver else "unknown"
+
+
 @router.get("/api/receivers")
 async def list_receivers(db: Session = Depends(get_db)):
     """Return configured receivers with current power state and capability flags."""
@@ -19,14 +31,7 @@ async def list_receivers(db: Session = Depends(get_db)):
         receiver = db.query(Receiver).filter_by(name=rcfg.name).first()
         client = EnigmaClient(rcfg.ip, mock=settings.mock_receivers)
         online = await client.is_online()
-        if online:
-            power_state = receiver.power_state if receiver else "unknown"
-        elif rcfg.power_method == "intertechno":
-            power_state = "off"
-        elif rcfg.power_method == "wol":
-            power_state = "standby"
-        else:
-            power_state = receiver.power_state if receiver else "unknown"
+        power_state = _infer_power_state(online, rcfg, receiver)
         result.append({
             "name": rcfg.name,
             "ip": rcfg.ip,
@@ -58,7 +63,13 @@ async def admin_status(db: Session = Depends(get_db)):
         receiver = db.query(Receiver).filter_by(name=rcfg.name).first()
         client = EnigmaClient(rcfg.ip, mock=settings.mock_receivers)
         online = await client.is_online()
-        power_state = await client.get_power_state() if online else "unknown"
+        if online:
+            power_state = await client.get_power_state()
+            # Refresh DB so list_receivers and other readers see the live state.
+            if receiver:
+                receiver.power_state = power_state
+        else:
+            power_state = _infer_power_state(False, rcfg, receiver)
 
         epg_cached_at = None
         if receiver:
@@ -102,6 +113,25 @@ async def admin_refresh(target: str = "all"):
 
 class UserPreferencesRequest(BaseModel):
     preferences: str
+
+
+@router.get("/api/admin/user-preferences")
+def get_user_preferences(user: str, db: Session = Depends(get_db)):
+    """Return a user's current stated preferences (empty string if none)."""
+    import json
+    from app.models import User, UserProfile
+
+    u = db.query(User).filter_by(slug=user).first()
+    if not u:
+        return {"ok": False, "error": f"unknown user '{user}'"}
+    profile = db.get(UserProfile, u.id)
+    prefs = ""
+    if profile:
+        try:
+            prefs = json.loads(profile.summary_json).get("stated_preferences") or ""
+        except Exception:
+            pass
+    return {"ok": True, "user": user, "preferences": prefs}
 
 
 @router.post("/api/admin/user-preferences")

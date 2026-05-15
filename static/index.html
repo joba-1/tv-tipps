@@ -256,6 +256,21 @@
       </template>
     </div>
 
+    <div class="admin-prefs">
+      <h3 x-text="t('label.prefs_heading')"></h3>
+      <template x-for="u in users" :key="u.slug">
+        <div class="admin-pref-row">
+          <label>
+            <strong x-text="u.name"></strong>
+            <textarea rows="3" x-model="prefsDraft[u.slug]"
+                      :placeholder="t('label.prefs_placeholder')"></textarea>
+          </label>
+          <button class="outline" @click="savePreferences(u.slug)"
+                  :disabled="prefsSaving === u.slug" x-text="t('btn.prefs_save')"></button>
+        </div>
+      </template>
+    </div>
+
     <div class="admin-stats" x-show="adminStatus">
       <p x-text="t('label.admin_channels', { n: adminStatus && adminStatus.db_channel_count })"></p>
       <p x-text="t('label.admin_epg_events', { n: adminStatus && adminStatus.db_epg_event_count })"></p>

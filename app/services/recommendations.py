@@ -155,10 +155,12 @@ def _build_prompt(
         if not ch:
             continue
         dur_min = (ev.duration_sec or 0) // 60
+        desc = (ev.short_desc or "").replace("\n", " ").strip()[:80]
+        desc_part = f" | {desc}" if desc else ""
         cand_lines.append(
             f"  [{i+1}] {ch.name} | {ev.title} | "
             f"{to_local_str(ev.start_time)}–{to_local_str(ev.end_time)} | "
-            f"{ev.genre or '-'} | {dur_min} min"
+            f"{ev.genre or '-'} | {dur_min} min{desc_part}"
         )
     cand_str = "\n".join(cand_lines) if cand_lines else "  (keine Sendungen)"
 

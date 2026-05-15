@@ -367,6 +367,27 @@ nav details ul a {
 .admin-stats { color: var(--pico-muted-color); font-size: 0.85rem; }
 .admin-msg { font-size: 0.85rem; color: var(--pico-primary); margin-bottom: 0.5rem; }
 
+.admin-prefs { margin: 1.5rem 0; }
+.admin-prefs h3 { margin: 0 0 0.5rem; font-size: 1rem; }
+.admin-pref-row {
+  display: flex;
+  gap: 0.75rem;
+  align-items: flex-end;
+  margin-bottom: 0.75rem;
+}
+.admin-pref-row label {
+  flex: 1;
+  font-size: 0.85rem;
+  margin: 0;
+}
+.admin-pref-row textarea {
+  width: 100%;
+  font-size: 0.85rem;
+  margin: 0.25rem 0 0;
+  resize: vertical;
+}
+.admin-pref-row button { margin: 0; flex-shrink: 0; }
+
 /* ---- Modal ---- */
 dialog article {
   max-width: 560px;

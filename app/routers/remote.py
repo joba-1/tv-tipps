@@ -42,48 +42,30 @@ async def zap_to_channel(req: ZapRequest):
     from app.enigma.client import EnigmaClient
     from app.services.power import wake_receiver
 
-    best_rcfg = None
-    best_client = None
+    rcfg, client = await _find_receiver(req.receiver)
+    woke = False
 
-    # If a specific receiver was requested, try it first
-    if req.receiver:
-        preferred = next((r for r in settings.receivers_by_priority if r.name == req.receiver), None)
-        if preferred:
-            client = EnigmaClient(preferred.ip, mock=settings.mock_receivers)
-            if await client.is_online():
-                best_rcfg = preferred
-                best_client = client
-
-    if best_rcfg is None:
-        for rcfg in settings.receivers_by_priority:
-            client = EnigmaClient(rcfg.ip, mock=settings.mock_receivers)
-            if await client.is_online():
-                best_rcfg = rcfg
-                best_client = client
+    # No box reachable → wake first in priority order, poll until online
+    if rcfg is None:
+        for r in settings.receivers_by_priority:
+            if not await wake_receiver(r):
+                continue
+            log.info("remote.waking_receiver", receiver=r.name)
+            c = EnigmaClient(r.ip, mock=settings.mock_receivers)
+            for _ in range(6):
+                await asyncio.sleep(5)
+                if await c.is_online():
+                    rcfg, client, woke = r, c, True
+                    break
+            if rcfg:
                 break
 
-    woke = False
-    if best_rcfg is None:
-        for rcfg in settings.receivers_by_priority:
-            if await wake_receiver(rcfg):
-                log.info("remote.waking_receiver", receiver=rcfg.name)
-                client = EnigmaClient(rcfg.ip, mock=settings.mock_receivers)
-                for _ in range(6):
-                    await asyncio.sleep(5)
-                    if await client.is_online():
-                        best_rcfg = rcfg
-                        best_client = client
-                        woke = True
-                        break
-                if best_rcfg:
-                    break
-
-    if best_rcfg is None or best_client is None:
+    if rcfg is None or client is None:
         raise HTTPException(503, "No receiver available")
 
-    ok = await best_client.zap(req.sref)
-    log.info("remote.zap", receiver=best_rcfg.name, sref=req.sref, ok=ok)
-    return {"ok": ok, "receiver_name": best_rcfg.name, "sref": req.sref, "woke": woke}
+    ok = await client.zap(req.sref)
+    log.info("remote.zap", receiver=rcfg.name, sref=req.sref, ok=ok)
+    return {"ok": ok, "receiver_name": rcfg.name, "sref": req.sref, "woke": woke}
 
 
 @router.post("/api/remote/key")

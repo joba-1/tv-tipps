@@ -43,6 +43,8 @@ function tvApp() {
     adminStatus: null,
     adminRefreshing: false,
     adminMsg: "",
+    prefsDraft: {},      // slug → current textarea value
+    prefsSaving: null,   // slug currently being saved (disables button)
 
     // Remote control
     remoteMsg: "",
@@ -265,7 +267,43 @@ function tvApp() {
         if (!res.ok) return;
         this.adminStatus = await res.json();
         this.receivers = this.adminStatus.receivers;
+        await this.loadAllPreferences();
       } catch (_) {}
+    },
+
+    async loadAllPreferences() {
+      const updated = {};
+      await Promise.all(this.users.map(async u => {
+        try {
+          const r = await fetch(`/api/admin/user-preferences?user=${encodeURIComponent(u.slug)}`);
+          if (r.ok) {
+            const d = await r.json();
+            updated[u.slug] = d.preferences || "";
+          }
+        } catch (_) {}
+      }));
+      this.prefsDraft = { ...this.prefsDraft, ...updated };
+    },
+
+    async savePreferences(slug) {
+      this.prefsSaving = slug;
+      try {
+        const user = this.users.find(u => u.slug === slug);
+        const res = await fetch(`/api/admin/user-preferences?user=${encodeURIComponent(slug)}`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ preferences: this.prefsDraft[slug] || "" }),
+        });
+        const data = await res.json();
+        this.adminMsg = data.ok
+          ? this.t("msg.prefs_saved", { name: user?.name || slug })
+          : this.t("msg.prefs_error");
+        if (data.ok && this.recsData) this.recsData = null;  // force refresh next view
+      } catch (_) {
+        this.adminMsg = this.t("msg.prefs_error");
+      } finally {
+        this.prefsSaving = null;
+      }
     },
 
     async adminRefresh(target) {

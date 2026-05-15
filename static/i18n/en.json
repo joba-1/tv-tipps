@@ -48,6 +48,11 @@
   "label.next_prefix": "Next: ",
   "label.admin_channels": "Channels in DB: {n}",
   "label.admin_epg_events": "EPG events in DB: {n}",
+  "label.prefs_heading": "Preferences",
+  "label.prefs_placeholder": "Favourite genres, shows, moods … what you like and what you don't.",
+  "btn.prefs_save": "Save",
+  "msg.prefs_saved": "✓ Preferences saved for {name}",
+  "msg.prefs_error": "⚠️ Save failed",
   "label.power_method": "{method}",
 
   "page.tips.title": "★ Tips",

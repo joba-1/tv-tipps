@@ -48,6 +48,11 @@
   "label.next_prefix": "Danach: ",
   "label.admin_channels": "Sender in DB: {n}",
   "label.admin_epg_events": "EPG-Events in DB: {n}",
+  "label.prefs_heading": "Vorlieben",
+  "label.prefs_placeholder": "Lieblings-Genres, Sendungen, Stimmungen … Was du magst und was nicht.",
+  "btn.prefs_save": "Speichern",
+  "msg.prefs_saved": "✓ Vorlieben für {name} gespeichert",
+  "msg.prefs_error": "⚠️ Speichern fehlgeschlagen",
   "label.power_method": "{method}",
 
   "page.tips.title": "★ Tips",
