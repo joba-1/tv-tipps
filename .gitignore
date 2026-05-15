@@ -1,0 +1,27 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.venv/
+*.egg-info/
+
+# Environment / secrets
+.env
+
+# Database
+*.db
+*.db-shm
+*.db-wal
+
+# Claude
+.claude/
+
+# Editor
+.vscode/
+*.swp
+*~
+
+# Test artifacts
+.pytest_cache/
+htmlcov/
+.coverage

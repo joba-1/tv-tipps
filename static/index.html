@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html lang="de" data-theme="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>tv-tips</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@picocss/pico@2/css/pico.min.css">
+  <link rel="stylesheet" href="/static/style.css">
+  <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3/dist/cdn.min.js"></script>
+  <script src="/static/app.js"></script>
+</head>
+<body x-data="tvApp()" x-init="init()">
+
+  <!-- Navigation -->
+  <nav class="container-fluid">
+    <ul>
+      <li><strong>📺 tv-tips</strong></li>
+    </ul>
+    <ul>
+      <li><a href="#now" :class="page==='now' && 'active'">Now &amp; Next</a></li>
+      <li><a href="#epg" :class="page==='epg' && 'active'">EPG</a></li>
+      <li>
+        <details class="dropdown">
+          <summary x-text="currentUser ? currentUser.name : 'User'"></summary>
+          <ul>
+            <template x-for="u in users" :key="u.slug">
+              <li><a href="#" @click.prevent="setUser(u.slug)" x-text="u.name"
+                     :style="currentUser && currentUser.slug===u.slug ? 'font-weight:bold' : ''"></a></li>
+            </template>
+          </ul>
+        </details>
+      </li>
+      <li>
+        <template x-for="rs in receiverStatus" :key="rs.name">
+          <span class="receiver-badge" :class="rs.online ? (rs.power_state==='on' ? 'online' : 'standby') : 'offline'"
+                :title="rs.name + ': ' + rs.power_state">
+            <span x-text="rs.name"></span>
+          </span>
+        </template>
+      </li>
+    </ul>
+  </nav>
+
+  <!-- Stale data banner -->
+  <div class="container-fluid stale-banner" x-show="staleBanner" x-transition>
+    ⚠️ Showing cached data — receiver(s) offline or EPG stale.
+  </div>
+
+  <!-- Now & Next page -->
+  <main class="container" x-show="page==='now'">
+    <div class="page-header">
+      <h2>Now &amp; Next</h2>
+      <small x-text="'Updated ' + lastRefresh"></small>
+      <button class="outline" @click="loadNowNext()" :aria-busy="loadingNow">Refresh</button>
+    </div>
+
+    <div x-show="loadingNow" aria-busy="true" class="loading-center">Loading EPG…</div>
+
+    <div class="channel-grid" x-show="!loadingNow">
+      <template x-for="ch in nowNext" :key="ch.channel_id">
+        <article class="channel-card" :class="ch.stale ? 'stale' : ''">
+          <header>
+            <img x-show="ch.picon_path" :src="piconUrl(ch)" class="picon"
+                 @error="$el.style.display='none'" loading="lazy">
+            <strong x-text="ch.channel_name"></strong>
+          </header>
+
+          <div x-show="ch.now" @click="showDetail(ch.now, ch.channel_name)" class="program now-program" role="button">
+            <div class="program-title" x-text="ch.now?.title"></div>
+            <div class="progress-bar">
+              <div class="progress-fill" :style="'width:' + (ch.now?.progress_pct || 0) + '%'"></div>
+            </div>
+            <small x-text="formatTime(ch.now?.start_time) + ' – ' + formatTime(ch.now?.end_time)"></small>
+          </div>
+          <div x-show="!ch.now" class="no-data">No current programme</div>
+
+          <div x-show="ch.next" class="program next-program" @click="showDetail(ch.next, ch.channel_name)" role="button">
+            <span class="next-label">Next: </span>
+            <span x-text="ch.next?.title"></span>
+            <small x-text="' · ' + formatTime(ch.next?.start_time)"></small>
+          </div>
+        </article>
+      </template>
+    </div>
+
+    <div x-show="!loadingNow && nowNext.length === 0" class="empty-state">
+      No channels found. Make sure receivers are online and run a refresh.
+    </div>
+  </main>
+
+  <!-- EPG range page -->
+  <main class="container" x-show="page==='epg'">
+    <div class="page-header">
+      <h2>EPG</h2>
+      <div class="epg-controls" role="group">
+        <button :class="epgContext==='2h' ? '' : 'outline'" @click="setEpgContext('2h')">+2h</button>
+        <button :class="epgContext==='4h' ? '' : 'outline'" @click="setEpgContext('4h')">+4h</button>
+        <button :class="epgContext==='tonight' ? '' : 'outline'" @click="setEpgContext('tonight')">Tonight</button>
+      </div>
+      <button class="outline" @click="loadEpg()" :aria-busy="loadingEpg">Refresh</button>
+    </div>
+
+    <div x-show="loadingEpg" aria-busy="true" class="loading-center">Loading EPG…</div>
+
+    <div x-show="!loadingEpg" class="epg-list">
+      <template x-for="ev in epgEvents" :key="ev.id">
+        <article class="epg-row" :class="isPrimeTime(ev) ? 'prime-time' : ''"
+                 @click="showDetail(ev, ev.channel_name)" role="button">
+          <div class="epg-time" x-text="formatTime(ev.start_time) + ' – ' + formatTime(ev.end_time)"></div>
+          <div class="epg-channel" x-text="ev.channel_name"></div>
+          <div class="epg-title">
+            <span x-text="ev.title"></span>
+            <span x-show="isPrimeTime(ev)" class="prime-badge">★ Prime</span>
+          </div>
+          <div class="epg-desc" x-text="ev.short_desc"></div>
+        </article>
+      </template>
+      <div x-show="epgEvents.length === 0 && !loadingEpg" class="empty-state">No programmes found.</div>
+    </div>
+  </main>
+
+  <!-- Programme detail modal -->
+  <dialog :open="modalOpen" @click.self="modalOpen=false">
+    <article>
+      <header>
+        <button class="close" @click="modalOpen=false" aria-label="Close">✕</button>
+        <strong x-text="modalChannel"></strong>
+      </header>
+      <h3 x-text="modalEvent?.title"></h3>
+      <p><small x-text="formatTime(modalEvent?.start_time) + ' – ' + formatTime(modalEvent?.end_time)"></small></p>
+      <p x-text="modalEvent?.short_desc"></p>
+      <p x-text="modalEvent?.long_desc" x-show="modalEvent?.long_desc && modalEvent?.long_desc !== modalEvent?.short_desc"></p>
+    </article>
+  </dialog>
+
+</body>
+</html>

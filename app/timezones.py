@@ -1,0 +1,43 @@
+from datetime import datetime, timezone, timedelta
+from zoneinfo import ZoneInfo
+from config import settings
+
+
+def _tz() -> ZoneInfo:
+    return ZoneInfo(settings.timezone)
+
+
+def utcnow() -> datetime:
+    return datetime.now(timezone.utc).replace(tzinfo=None)
+
+
+def from_timestamp(ts: int) -> datetime:
+    """Unix epoch → naive UTC datetime."""
+    return datetime.fromtimestamp(ts, tz=timezone.utc).replace(tzinfo=None)
+
+
+def to_local_str(dt: datetime) -> str:
+    """Naive UTC datetime → local time string for display / AI prompts."""
+    aware = dt.replace(tzinfo=timezone.utc)
+    local = aware.astimezone(_tz())
+    return local.strftime("%Y-%m-%d %H:%M")
+
+
+def tonight_range() -> tuple[datetime, datetime]:
+    """Return (start, end) in naive UTC for tonight 18:00 → 02:00 local."""
+    tz = _tz()
+    now_local = datetime.now(tz)
+    start_local = now_local.replace(hour=18, minute=0, second=0, microsecond=0)
+    if now_local.hour >= 2:
+        pass  # start is today 18:00
+    else:
+        start_local -= timedelta(days=1)
+    end_local = start_local + timedelta(hours=8)  # 18:00 + 8h = 02:00
+    start_utc = start_local.astimezone(timezone.utc).replace(tzinfo=None)
+    end_utc = end_local.astimezone(timezone.utc).replace(tzinfo=None)
+    return start_utc, end_utc
+
+
+def hours_range(hours: float) -> tuple[datetime, datetime]:
+    now = utcnow()
+    return now, now + timedelta(hours=hours)
