@@ -4,6 +4,7 @@
   "nav.epg": "EPG",
   "nav.admin": "Admin",
   "nav.user_label": "Nutzer",
+  "nav.receiver_label": "Gerät",
 
   "context.now": "Jetzt",
   "context.next": "Als nächstes",
@@ -14,8 +15,7 @@
   "btn.refresh": "↺",
   "btn.wake": "⚡ Wake",
   "btn.sleep": "💤 Sleep",
-  "btn.refresh_all": "↺ Alle",
-  "btn.refresh_channels": "Sender",
+  "btn.refresh_all": "↺ Alle Sender",
   "btn.refresh_epg": "EPG voll",
   "btn.close": "Schließen",
 

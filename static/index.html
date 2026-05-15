@@ -17,29 +17,48 @@
       <li><strong>📺 tv-tips</strong></li>
     </ul>
     <ul>
-      <li><a href="#recs"  :class="page==='recs'  && 'active'" x-text="t('nav.tips')"></a></li>
-      <li><a href="#now"   :class="page==='now'   && 'active'" x-text="t('nav.now_next')"></a></li>
-      <li><a href="#epg"   :class="page==='epg'   && 'active'" x-text="t('nav.epg')"></a></li>
-      <li><a href="#admin" :class="page==='admin'  && 'active'" x-text="t('nav.admin')"></a></li>
+      <li>
+        <details class="dropdown">
+          <summary x-text="{'recs': t('nav.tips'), 'now': t('nav.now_next'), 'epg': t('nav.epg'), 'admin': t('nav.admin')}[page] || t('nav.tips')"></summary>
+          <ul>
+            <li><a href="#recs"  @click="$el.closest('details').removeAttribute('open')" x-text="t('nav.tips')"  :style="page==='recs'  ? 'font-weight:bold' : ''"></a></li>
+            <li><a href="#now"   @click="$el.closest('details').removeAttribute('open')" x-text="t('nav.now_next')" :style="page==='now'   ? 'font-weight:bold' : ''"></a></li>
+            <li><a href="#epg"   @click="$el.closest('details').removeAttribute('open')" x-text="t('nav.epg')"    :style="page==='epg'   ? 'font-weight:bold' : ''"></a></li>
+            <li><a href="#admin" @click="$el.closest('details').removeAttribute('open')" x-text="t('nav.admin')"  :style="page==='admin' ? 'font-weight:bold' : ''"></a></li>
+          </ul>
+        </details>
+      </li>
       <li>
         <details class="dropdown">
           <summary x-text="currentUser ? currentUser.name : t('nav.user_label')"></summary>
           <ul>
             <template x-for="u in users" :key="u.slug">
-              <li><a href="#" @click.prevent="setUser(u.slug)" x-text="u.name"
+              <li><a href="#" @click.prevent="setUser(u.slug); $el.closest('details').removeAttribute('open')" x-text="u.name"
                      :style="currentUser && currentUser.slug===u.slug ? 'font-weight:bold' : ''"></a></li>
             </template>
           </ul>
         </details>
       </li>
       <li>
-        <template x-for="r in receivers" :key="r.name">
-          <span class="receiver-badge"
-                :class="r.online ? (r.power_state==='on' ? 'online' : 'standby') : 'offline'"
-                :title="r.name + ' · ' + r.power_state + (r.location ? ' · ' + r.location : '')">
-            <span x-text="r.location || r.name"></span>
-          </span>
-        </template>
+        <details class="dropdown">
+          <summary>
+            <span class="state-dot" x-show="selectedReceiver"
+                  :class="selectedReceiver ? (selectedReceiver.online ? (selectedReceiver.power_state==='on' ? 'online' : 'standby') : (selectedReceiver.power_state==='off' ? 'off' : 'offline')) : ''"></span>
+            <span x-text="selectedReceiver ? (selectedReceiver.location || selectedReceiver.name) : t('nav.receiver_label')"></span>
+          </summary>
+          <ul>
+            <li><a href="#" @click.prevent="setReceiver(null); $el.closest('details').removeAttribute('open')"
+                   :style="!selectedReceiver ? 'font-weight:bold' : ''"
+                   x-text="t('nav.receiver_label')"></a></li>
+            <template x-for="r in receivers" :key="r.name">
+              <li><a href="#" @click.prevent="setReceiver(r.name); $el.closest('details').removeAttribute('open')"
+                     :style="selectedReceiver && selectedReceiver.name===r.name ? 'font-weight:bold' : ''">
+                <span class="state-dot" :class="r.online ? (r.power_state==='on' ? 'online' : 'standby') : (r.power_state==='off' ? 'off' : 'offline')"></span>
+                <span x-text="r.location || r.name"></span>
+              </a></li>
+            </template>
+          </ul>
+        </details>
       </li>
     </ul>
   </nav>
@@ -49,24 +68,23 @@
        x-text="t('msg.translation_pending')"></div>
 
   <!-- Stale data banner -->
-  <div class="container-fluid stale-banner" x-show="staleBanner" x-transition
+  <div class="container-fluid stale-banner" x-show="staleBanner && page !== 'admin'" x-transition
        x-text="t('msg.stale')"></div>
 
   <!-- ★ Recommendations page (default) -->
   <main class="container" x-show="page==='recs'">
     <div class="page-header">
       <h2 x-text="t('page.tips.title')"></h2>
-      <div class="context-tabs" role="group">
-        <button :class="recsContext==='now'   ? '' : 'outline'" @click="setRecsContext('now')"
-                x-text="t('context.now')"></button>
-        <button :class="recsContext==='next'  ? '' : 'outline'" @click="setRecsContext('next')"
-                x-text="t('context.next')"></button>
-        <button :class="recsContext==='prime' ? '' : 'outline'" @click="setRecsContext('prime')"
-                x-text="t('context.prime')"></button>
-        <button :class="recsContext==='today' ? '' : 'outline'" @click="setRecsContext('today')"
-                x-text="t('context.today')"></button>
-      </div>
-      <button class="outline" @click="loadRecs()" :aria-busy="loadingRecs"
+      <details class="dropdown context-dropdown">
+        <summary x-text="{'now': t('context.now'), 'next': t('context.next'), 'prime': t('context.prime'), 'today': t('context.today')}[recsContext]"></summary>
+        <ul>
+          <li><a href="#" @click.prevent="setRecsContext('now');  $el.closest('details').removeAttribute('open')" x-text="t('context.now')"   :style="recsContext==='now'   ? 'font-weight:bold' : ''"></a></li>
+          <li><a href="#" @click.prevent="setRecsContext('next'); $el.closest('details').removeAttribute('open')" x-text="t('context.next')"  :style="recsContext==='next'  ? 'font-weight:bold' : ''"></a></li>
+          <li><a href="#" @click.prevent="setRecsContext('prime');$el.closest('details').removeAttribute('open')" x-text="t('context.prime')" :style="recsContext==='prime' ? 'font-weight:bold' : ''"></a></li>
+          <li><a href="#" @click.prevent="setRecsContext('today');$el.closest('details').removeAttribute('open')" x-text="t('context.today')" :style="recsContext==='today' ? 'font-weight:bold' : ''"></a></li>
+        </ul>
+      </details>
+      <button class="outline secondary refresh-btn" @click="loadRecs()" :aria-busy="loadingRecs"
               x-text="t('btn.refresh')"></button>
     </div>
 
@@ -82,7 +100,7 @@
     <div class="rec-list" x-show="!loadingRecs">
       <template x-for="(rec, idx) in (recsData && recsData.recommendations || [])"
                 :key="rec.sref + idx">
-        <article class="rec-card">
+        <article class="rec-card" @click="showDetail(rec, rec.channel_name)" role="button">
           <header>
             <div class="rec-rank" x-text="t('label.rank', { n: idx+1 })"></div>
             <div class="rec-channel" x-text="rec.channel_name"></div>
@@ -123,7 +141,7 @@
     <div class="page-header">
       <h2 x-text="t('page.now.title')"></h2>
       <small x-text="t('label.updated', { time: lastRefresh })"></small>
-      <button class="outline" @click="loadNowNext()" :aria-busy="loadingNow"
+      <button class="outline secondary refresh-btn" @click="loadNowNext()" :aria-busy="loadingNow"
               x-text="t('btn.refresh')"></button>
     </div>
 
@@ -168,15 +186,15 @@
   <main class="container" x-show="page==='epg'">
     <div class="page-header">
       <h2 x-text="t('page.epg.title')"></h2>
-      <div class="context-tabs" role="group">
-        <button :class="epgContext==='2h'      ? '' : 'outline'" @click="setEpgContext('2h')"
-                x-text="t('label.epg_2h')"></button>
-        <button :class="epgContext==='4h'      ? '' : 'outline'" @click="setEpgContext('4h')"
-                x-text="t('label.epg_4h')"></button>
-        <button :class="epgContext==='tonight' ? '' : 'outline'" @click="setEpgContext('tonight')"
-                x-text="t('label.epg_tonight')"></button>
-      </div>
-      <button class="outline" @click="loadEpg()" :aria-busy="loadingEpg"
+      <details class="dropdown context-dropdown">
+        <summary x-text="{'2h': t('label.epg_2h'), '4h': t('label.epg_4h'), 'tonight': t('label.epg_tonight')}[epgContext]"></summary>
+        <ul>
+          <li><a href="#" @click.prevent="setEpgContext('2h');      $el.closest('details').removeAttribute('open')" x-text="t('label.epg_2h')"      :style="epgContext==='2h'      ? 'font-weight:bold' : ''"></a></li>
+          <li><a href="#" @click.prevent="setEpgContext('4h');      $el.closest('details').removeAttribute('open')" x-text="t('label.epg_4h')"      :style="epgContext==='4h'      ? 'font-weight:bold' : ''"></a></li>
+          <li><a href="#" @click.prevent="setEpgContext('tonight'); $el.closest('details').removeAttribute('open')" x-text="t('label.epg_tonight')" :style="epgContext==='tonight' ? 'font-weight:bold' : ''"></a></li>
+        </ul>
+      </details>
+      <button class="outline secondary refresh-btn" @click="loadEpg()" :aria-busy="loadingEpg"
               x-text="t('btn.refresh')"></button>
     </div>
 
@@ -190,7 +208,7 @@
                x-text="formatTime(ev.start_time) + ' – ' + formatTime(ev.end_time)"></div>
           <div class="epg-channel" x-text="ev.channel_name"></div>
           <div class="epg-title"   x-text="ev.title"></div>
-          <div class="epg-desc"    x-text="ev.short_desc"></div>
+          <div class="epg-desc"    x-text="ev.short_desc || ev.long_desc"></div>
         </article>
       </template>
       <div x-show="epgEvents.length === 0 && !loadingEpg"
@@ -204,8 +222,6 @@
       <h2 x-text="t('page.admin.title')"></h2>
       <button class="outline" @click="adminRefresh('all')" :aria-busy="adminRefreshing"
               x-text="t('btn.refresh_all')"></button>
-      <button class="outline" @click="adminRefresh('channels')"
-              x-text="t('btn.refresh_channels')"></button>
       <button class="outline" @click="adminRefresh('epg_full')"
               x-text="t('btn.refresh_epg')"></button>
     </div>
@@ -216,7 +232,7 @@
         <article class="admin-receiver-card">
           <header>
             <span class="receiver-badge"
-                  :class="r.online ? (r.power_state==='on' ? 'online' : 'standby') : 'offline'">
+                  :class="r.online ? (r.power_state==='on' ? 'online' : 'standby') : (r.power_state==='off' ? 'off' : 'offline')">
               <span x-text="r.location || r.name"></span>
             </span>
             <small x-text="r.name + ' · ' + r.ip"></small>
