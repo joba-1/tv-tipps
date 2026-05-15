@@ -10,7 +10,7 @@ It learns your viewing habits and surfaces the programmes you are most likely to
 Open the app in any browser on your home network:
 
 ```
-http://<server-address>:8765
+http://<server-address>:8844
 ```
 
 On your first visit the app automatically detects your browser language (German, English, or other).
@@ -28,6 +28,19 @@ Each profile tracks your own viewing history separately, so recommendations are 
 
 ---
 
+## Choosing your receiver
+
+If you have more than one receiver in the house, a device selector appears in the navigation bar.
+Tap it and pick the room you want the **Watch** button to zap.
+Your choice is remembered via a browser cookie.
+
+The coloured dot next to each receiver shows its live status:
+- 🟢 **Green** — on and responding
+- 🟡 **Yellow** — in standby (Watch will wake it automatically)
+- 🔴 **Red** — offline / unreachable
+
+---
+
 ## ★ Tips — personalised recommendations
 
 This is the main page. It shows a ranked list of programmes that match your taste.
@@ -37,7 +50,7 @@ This is the main page. It shows a ranked list of programmes that match your tast
 | Button | What it shows |
 |--------|--------------|
 | **Now** | Programmes currently on air |
-| **Up Next** | Programmes starting in the next 2 hours |
+| **⏯ Up Next** | Programmes starting in the next 2 hours |
 | **Prime Time** | Tonight's prime-time window (20:00–23:00) |
 | **Today** | Everything airing from now until midnight |
 
@@ -50,14 +63,18 @@ Switch context with the buttons at the top. The list refreshes automatically eve
   Tatort: Feuerkind
   Crime  ████████░░  87%
   "Based on your Crime viewing history on Saturdays"
-                                      ▶ Watch
+                                      👍 Like   ▶ Watch
 ```
 
 - **Rank** — order within this context, best match first.
 - **Match %** — how well the programme fits your taste profile (0–100 %).
 - **Reason** — one sentence from the AI explaining why it was recommended.
-- **Watch** — switches your receiver to that channel immediately.
+- **👍 Like** — tap to mark this programme as something you enjoy. Likes are a strong signal for future recommendations. Tap again to un-like.
+- **Watch** — switches your selected receiver to that channel immediately.
   If the receiver is in standby it will be woken automatically before switching.
+  A toast notification confirms the switch and shows the room name of the receiver used.
+
+Tap anywhere on a card (except the buttons) to open a description popup with the full synopsis.
 
 ### Cold start
 
@@ -67,21 +84,18 @@ After about 10 confirmed viewing sessions the AI takes over.
 
 A *confirmed* session means you watched a channel for at least 5 minutes.
 
+You can skip the cold-start gate entirely by setting your preferences in the **⚙ Admin** page.
+
 ---
 
-## Now & Next
+## ⏯ Now & Next
 
 A grid showing every channel with what is on right now and what comes next.
-Tap any programme to see its full description.
-
-The coloured dots on receiver badges in the navigation bar show live status:
-- 🟢 **Green** — receiver on and responding
-- 🟡 **Yellow** — receiver in standby (can be woken)
-- 🔴 **Red** — receiver offline
+Tap any programme to see its full description and a Like / Watch button.
 
 ---
 
-## EPG
+## 📅 EPG
 
 A time-ordered list of upcoming programmes.
 
@@ -89,11 +103,12 @@ Use the buttons to choose a window:
 
 | Button | Scope |
 |--------|-------|
-| **+2h** | Next 2 hours |
+| **+2h** | Next 2 hours (upcoming only — does not include currently-airing shows) |
 | **+4h** | Next 4 hours |
-| **Tonight** | From 18:00 to 02:00 tonight |
+| **Tonight** | From 18:00 to 02:00 tonight (includes currently-airing shows) |
 
-Tap any entry for a description popup.
+Use the **search box** at the top to filter by title or description keywords across the next 7 days.
+Tap any entry for a description popup with a Like button.
 
 ---
 
@@ -104,11 +119,25 @@ The genres come from the satellite broadcaster's EPG data — if a programme has
 
 ---
 
+## 📱 Remote Control
+
+A virtual remote control for the selected receiver:
+- Power on / standby
+- Volume, channel up/down
+- D-pad navigation (up/down/left/right/OK)
+- Info, Menu, Back
+- Live screenshot (refreshed on demand)
+
+---
+
 ## Frequently asked questions
 
 **Why does the Watch button sometimes pause for a few seconds?**
 If the receiver is in standby the app wakes it first, then switches the channel.
 This takes up to 30 seconds depending on the box.
+
+**The Watch toast shows a room name ("Wohnzimmer") — how is that set?**
+The room label is configured by the administrator via the `location=` flag in the receiver config.
 
 **Why are programme titles still in German?**
 Titles and descriptions come directly from the broadcaster's EPG and are not translated.
@@ -121,7 +150,14 @@ After a profile switch the list reloads automatically.
 **How long until my Tips feel personal?**
 The AI needs roughly 10 confirmed viewing sessions (each at least 5 minutes) before personalisation kicks in.
 The profile is recomputed every 24 hours from your last 30 days of history.
+You can accelerate this by setting your preferences in Admin, or by using the 👍 Like button.
+
+**What does the Like button do exactly?**
+It records that you enjoy this type of programme. The AI includes your liked programmes as a strong positive signal alongside your viewing history. Likes are preserved even after an EPG event expires.
 
 **Can I watch on two receivers at once?**
-The Watch button always sends the zap command to the highest-priority online receiver.
-There is currently no way to target a specific receiver from the UI.
+Yes — use the receiver selector in the navigation bar to choose which box receives the Watch command.
+Each user can independently select their preferred receiver.
+
+**My language was translated but some words look wrong.**
+AI translations are a best-effort batch from German. You can work around individual errors by asking the administrator to add a hand-curated translation file for your language.

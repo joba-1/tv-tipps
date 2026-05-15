@@ -24,29 +24,80 @@ Any model that can produce reliable JSON output works; larger models give better
 
 ---
 
-## Installation
+## Quick install (recommended)
+
+```bash
+git clone https://github.com/joba-1/tv-tips.git
+cd tv-tips
+sudo ./deploy.sh
+```
+
+The script installs the app, creates a Python venv, writes a config template, installs and starts a systemd service, and prints next steps.
+
+### Options
+
+```
+sudo ./deploy.sh [--prefix DIR] [--port PORT] [--user USER]
+```
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `--prefix DIR` | `/usr/local` | Install root; app lands in `$PREFIX/lib/tv-tips/` |
+| `--port PORT` | `8844` | Listening port |
+| `--user USER` | current sudo user | OS user that owns and runs the service |
+
+Example:
+
+```bash
+sudo ./deploy.sh --prefix /opt --port 8765 --user myuser
+```
+
+### What the script does
+
+1. Copies app files to `$PREFIX/lib/tv-tips/` (rsync, skips `.git`, `.env`, DB files)
+2. Creates a Python venv at `$PREFIX/lib/tv-tips/.venv/` and installs `requirements.txt`
+3. Creates `/var/lib/tv-tips/` for the SQLite database
+4. Creates `/etc/tv-tips/env` (config file) — **written once, never overwritten on re-deploy**
+5. Installs `/etc/systemd/system/tv-tips.service` and starts the service
+
+### After install
+
+1. Edit `/etc/tv-tips/env` — set your receiver IPs, usernames, and Ollama model
+2. `sudo systemctl restart tv-tips`
+3. Open `http://<host>:8844/`
+
+### Updating
+
+```bash
+cd tv-tips
+git pull
+sudo ./deploy.sh   # same options as initial install
+```
+
+The deploy script is idempotent: it upgrades the app and venv but never touches your existing config file.
+
+---
+
+## Manual installation
 
 ```bash
 git clone https://github.com/joba-1/tv-tips.git
 cd tv-tips
 
 python3 -m venv .venv
-source .venv/bin/activate        # Windows: .venv\Scripts\activate
+source .venv/bin/activate
 
 pip install -r requirements.txt
+cp /dev/null .env   # create empty, then edit
 ```
 
 ---
 
 ## Configuration
 
-Copy the example and edit:
+The config file is `/etc/tv-tips/env` (deploy script) or `.env` in the working directory (manual).
 
-```bash
-cp .env.example .env   # or create .env from scratch
-```
-
-### `.env` reference
+### Full reference
 
 ```ini
 # ── Receivers ────────────────────────────────────────────────────────────────
@@ -55,8 +106,9 @@ cp .env.example .env   # or create .env from scratch
 #        has_genre=true   OWIF firmware exposes genre strings
 #        wol_mac=<MAC>    enables Wake-on-LAN (power_method=wol)
 #        power_method=wol|intertechno|none
-RECEIVERS_RAW=box15:192.168.1.15:alice|priority=2|wol_mac=00:1d:ec:17:0e:a1|power_method=wol,\
-              box17:192.168.1.17:bob|priority=1|has_genre=true|power_method=intertechno
+#        location=<room>  human-readable label shown in watch toasts
+RECEIVERS_RAW=box15:192.168.1.15:alice|priority=2|wol_mac=00:1d:ec:17:0e:a1|power_method=wol|location=Wohnzimmer,\
+              box17:192.168.1.17:bob|priority=1|has_genre=true|power_method=intertechno|location=Schlafzimmer
 
 # ── Users ────────────────────────────────────────────────────────────────────
 # Format: slug:Display Name, comma-separated
@@ -79,20 +131,18 @@ PRIME_END_HOUR=23            # local hour (exclusive)
 
 # ── IntertechnoGateway (optional) ────────────────────────────────────────────
 # Only needed if a receiver uses power_method=intertechno.
-# The gateway is a small HTTP server that controls a 433 MHz RF switch.
-INTERTECHNO_URL=http://intertechnogw   # or IP address
-INTERTECHNO_FAMILY=A                   # RF family letter
-INTERTECHNO_DEVICE=1                   # RF device number
+INTERTECHNO_URL=http://intertechnogw
+INTERTECHNO_FAMILY=A
+INTERTECHNO_DEVICE=1
 
 # ── Misc ─────────────────────────────────────────────────────────────────────
-DB_PATH=tv_tips.db
-LOG_LEVEL=INFO                 # DEBUG | INFO | WARNING | ERROR
-MOCK_RECEIVERS=false           # true → load fixtures from tests/fixtures/ instead of live HTTP
-SSH_ENABLED=false              # reserved, unused
+DB_PATH=/var/lib/tv-tips/tv_tips.db
+LOG_LEVEL=INFO
+MOCK_RECEIVERS=false
+SSH_ENABLED=false
 ```
 
-> **Security**: `.env` contains no credentials, but keep it out of version control.
-> The repo's `.gitignore` already excludes it.
+> **Security**: the config file contains no credentials. Keep it readable only by the service user (`chmod 640`).
 
 ---
 
@@ -105,37 +155,32 @@ source .venv/bin/activate
 uvicorn main:app --host 0.0.0.0 --port 8765 --reload
 ```
 
-### Production (systemd)
+### Production (systemd — installed by deploy.sh)
 
-Create `/etc/systemd/system/tv-tips.service`:
+```bash
+sudo systemctl status tv-tips
+sudo systemctl restart tv-tips
+journalctl -u tv-tips -f
+```
+
+Manual service file at `/etc/systemd/system/tv-tips.service`:
 
 ```ini
 [Unit]
-Description=tv-tips recommendation server
+Description=tv-tips TV recommendation server
 After=network.target
 
 [Service]
 Type=simple
-User=joachim
-WorkingDirectory=/home/joachim/git/tv-tips
-ExecStart=/home/joachim/git/tv-tips/.venv/bin/uvicorn main:app --host 0.0.0.0 --port 8765
+User=myuser
+WorkingDirectory=/usr/local/lib/tv-tips
+EnvironmentFile=/etc/tv-tips/env
+ExecStart=/usr/local/lib/tv-tips/.venv/bin/uvicorn main:app --host 0.0.0.0 --port 8844
 Restart=on-failure
 RestartSec=5
 
 [Install]
 WantedBy=multi-user.target
-```
-
-```bash
-sudo systemctl daemon-reload
-sudo systemctl enable --now tv-tips
-sudo systemctl status tv-tips
-```
-
-Logs:
-
-```bash
-journalctl -u tv-tips -f
 ```
 
 ---
@@ -168,6 +213,11 @@ The gateway controls a 433 MHz RF mains switch shared between the TV and a recei
 Manual on/off is available via the Admin page → Wake / Sleep buttons.
 **Automatic power scheduling is intentionally disabled** because the TV shares the circuit.
 
+### Receiver location
+
+Set a `location=` flag on each receiver (e.g. `location=Wohnzimmer`) so watch toasts say
+"▶ Switched to Wohnzimmer" instead of the internal name.
+
 ---
 
 ## Ollama setup
@@ -184,21 +234,20 @@ Verify:
 curl http://localhost:11434/api/tags | python3 -m json.tool
 ```
 
-If Ollama is on a different machine, set `OLLAMA_URL=http://<host>:11434` in `.env`.
+If Ollama is on a different machine, set `OLLAMA_URL=http://<host>:11434` in the config.
 Recommendations fall back to a rule-based ranking if Ollama is unreachable.
 
 ---
 
 ## Database
 
-SQLite file at `DB_PATH` (default `tv_tips.db`).
-The schema is created automatically on first start.
-No manual migrations are needed when upgrading — `init_db()` calls `create_all()`.
+SQLite file at `DB_PATH` (default `/var/lib/tv-tips/tv_tips.db` when using deploy.sh).
+The schema is created automatically on first start — no manual migrations needed.
 
 ### Useful queries
 
 ```bash
-sqlite3 tv_tips.db
+sqlite3 /var/lib/tv-tips/tv_tips.db
 
 # Confirmed viewing sessions per user
 SELECT u.name, COUNT(*) FROM viewing_sessions vs
@@ -210,19 +259,23 @@ SELECT lang, COUNT(*), MAX(generated_at) FROM translations GROUP BY lang;
 
 # Recommendation cache entries
 SELECT user_id, prompt_hash, valid_until FROM recommendation_cache;
+
+# Liked events per user
+SELECT u.name, COUNT(*) FROM user_likes l
+JOIN users u ON l.user_id = u.id GROUP BY u.name;
 ```
 
 ### Backup
 
 ```bash
-sqlite3 tv_tips.db ".backup tv_tips_backup.db"
+sqlite3 /var/lib/tv-tips/tv_tips.db ".backup tv_tips_backup.db"
 ```
 
 ---
 
 ## Admin page
 
-Open the app → **Admin** tab.
+Open the app → **⚙ Admin** tab.
 
 | Button | Action |
 |--------|--------|
@@ -231,6 +284,7 @@ Open the app → **Admin** tab.
 | **Full EPG** | Fetch 24h EPG for every channel (slow, ~1 min) |
 | **⚡ Wake** | Send WOL packet or toggle Intertechno switch on |
 | **💤 Sleep** | Put receiver into light standby (WOL) or switch Intertechno off |
+| **Preferences** | Edit per-user stated preferences (bypasses cold-start gate) |
 
 Scheduled jobs run automatically:
 - EPG now/next: every hour
@@ -252,9 +306,28 @@ To add a hand-curated translation for a new language (e.g. French):
 
 1. Copy `static/i18n/de.json` → `static/i18n/fr.json`
 2. Translate the values (keep the keys unchanged)
-3. Restart the server (the file is read on every request, no restart strictly needed)
+3. No restart needed — the file is read on every request
 
 Curated file entries always override AI-generated entries.
+
+---
+
+## Running tests
+
+```bash
+source .venv/bin/activate
+pytest tests/ -q
+```
+
+Tests use an in-memory SQLite database. No receivers or Ollama instance is required.
+
+Test coverage:
+- `test_parser.py` — EPG/channel fixture parsing
+- `test_timezones.py` — range functions (prime, tonight, today)
+- `test_i18n.py` — language normalisation, translation merge priority
+- `test_recommendations.py` — rule-based ranking, cold-start gate, LLM index parsing
+- `test_profile.py` — profile computation, caching, stated preferences
+- `test_epg.py` — EPG range queries (future_only semantics), cleanup
 
 ---
 
@@ -267,26 +340,29 @@ All endpoints are on the same host/port.
 | GET | `/api/recommendations?context=now\|next\|prime\|today` | AI-ranked recommendations for the current user (cookie) |
 | GET | `/api/now-next` | Current + next programme per channel |
 | GET | `/api/epg?hours=N` or `?context=tonight` | EPG range |
+| GET | `/api/epg/search?q=...&days=7` | Full-text EPG search |
 | GET | `/api/receivers` | Receiver list with live status |
 | GET | `/api/users` | Configured user list |
 | GET | `/api/i18n/{lang}` | UI string dict for a language |
 | POST | `/api/remote/zap` | `{"sref":"..."}` — switch channel (auto-wake) |
+| POST | `/api/likes/toggle` | Toggle like on an EPG event |
+| GET | `/api/likes` | Current user's liked events |
 | GET | `/api/admin/status` | Receiver status + DB counts |
 | POST | `/api/admin/refresh?target=all\|channels\|epg\|epg_full` | Trigger data refresh |
 | POST | `/api/admin/power?receiver=NAME&action=wake\|sleep` | Manual power control |
+| GET | `/api/admin/user-preferences?user=slug` | Get stated preferences |
+| POST | `/api/admin/user-preferences?user=slug` | Set stated preferences |
 
-Interactive API docs: `http://<server>:8765/docs`
+Interactive API docs: `http://<server>:<port>/docs`
 
 ---
 
 ## Updating
 
 ```bash
-cd /home/joachim/git/tv-tips
+cd tv-tips
 git pull
-source .venv/bin/activate
-pip install -r requirements.txt    # pick up any new deps
-sudo systemctl restart tv-tips
+sudo ./deploy.sh   # re-runs with same options; never overwrites config
 ```
 
 Check the version: `cat VERSION`
@@ -303,14 +379,13 @@ Check the version: `cat VERSION`
 | Translation pending forever | Check logs for `i18n.batch_failed`; verify Ollama is up |
 | Watch button returns 503 | No receiver is online; check power and network |
 | Sessions not confirming | `MIN_WATCH_SEC` is 300 (5 min); watch a channel for that long |
+| Save button stays grey in Admin | No changes detected yet — edit the text area first |
 
 Logs (structured JSON):
 
 ```bash
 journalctl -u tv-tips -f | python3 -m json.tool
 ```
-
-Or in development mode the logs print to stdout in human-readable format.
 
 ---
 
@@ -322,3 +397,6 @@ Or in development mode the logs print to stdout in human-readable format.
 | 0.2.0 | Feature-based receiver config, generic power management |
 | 0.3.0 | AI recommendation pipeline, recommendations landing page, zap endpoint |
 | 0.4.0 | Internationalisation — browser language detection, AI batch translation, genre localisation |
+| 0.5.0 | AI recommendation improvements: short_desc in prompt, likes signal, stated preferences bypass cold-start |
+| 1.0.0 | Like button, EPG search, admin preferences UI, receiver location in toasts |
+| 1.0.1 | Nav icons, watch toast shows room name, admin Save button disabled when unchanged; deploy.sh; full test suite |
