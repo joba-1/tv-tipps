@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Depends
+from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from app.database import get_db
 from app.models import Receiver, Channel, EpgEvent
@@ -18,6 +19,14 @@ async def list_receivers(db: Session = Depends(get_db)):
         receiver = db.query(Receiver).filter_by(name=rcfg.name).first()
         client = EnigmaClient(rcfg.ip, mock=settings.mock_receivers)
         online = await client.is_online()
+        if online:
+            power_state = receiver.power_state if receiver else "unknown"
+        elif rcfg.power_method == "intertechno":
+            power_state = "off"
+        elif rcfg.power_method == "wol":
+            power_state = "standby"
+        else:
+            power_state = receiver.power_state if receiver else "unknown"
         result.append({
             "name": rcfg.name,
             "ip": rcfg.ip,
@@ -26,7 +35,7 @@ async def list_receivers(db: Session = Depends(get_db)):
             "power_method": rcfg.power_method,
             "location": rcfg.location,
             "online": online,
-            "power_state": receiver.power_state if receiver else "unknown",
+            "power_state": power_state,
             "last_seen": receiver.last_seen.isoformat() if receiver and receiver.last_seen else None,
             "wol_mac": rcfg.wol_mac,
         })
@@ -89,6 +98,25 @@ async def admin_refresh(target: str = "all"):
     from app.services.poller import run_refresh
     await run_refresh(target)
     return {"ok": True, "target": target}
+
+
+class UserPreferencesRequest(BaseModel):
+    preferences: str
+
+
+@router.post("/api/admin/user-preferences")
+def set_user_preferences(user: str, req: UserPreferencesRequest, db: Session = Depends(get_db)):
+    """Set or replace a user's stated preferences. Invalidates recommendation cache."""
+    from app.models import User, RecommendationCache
+    from app.services.profile import set_stated_preferences
+
+    u = db.query(User).filter_by(slug=user).first()
+    if not u:
+        return {"ok": False, "error": f"unknown user '{user}'"}
+    set_stated_preferences(u.id, req.preferences, db)
+    db.query(RecommendationCache).filter_by(user_id=u.id).delete()
+    db.commit()
+    return {"ok": True, "user": user}
 
 
 @router.post("/api/admin/power")

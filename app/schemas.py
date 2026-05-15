@@ -1,6 +1,6 @@
 """Pydantic response/request models."""
 from __future__ import annotations
-from pydantic import BaseModel
+from pydantic import BaseModel, model_validator
 
 
 class EpgEventOut(BaseModel):
@@ -33,6 +33,7 @@ class EpgRangeItem(BaseModel):
     sref: str
     title: str
     short_desc: str | None
+    long_desc: str | None = None
     start_time: str
     end_time: str
     duration_sec: int | None
@@ -60,16 +61,27 @@ class AdminStatus(BaseModel):
 
 
 class RecommendationItem(BaseModel):
-    sref: str
-    channel_name: str
+    sref: str | None = None
+    channel_name: str | None = None
     title: str
-    start_time: str
-    end_time: str
+    short_desc: str | None = None
+    long_desc: str | None = None
+    start_time: str | None = None
+    end_time: str | None = None
     genre: str | None = None
-    match_score: float
-    reason: str
+    match_score: float = 0.5
+    reason: str = ""
+
+    @model_validator(mode="before")
+    @classmethod
+    def _normalise(cls, data: object) -> object:
+        if isinstance(data, dict):
+            # Some models return "score" instead of "match_score"
+            if "score" in data and "match_score" not in data:
+                data["match_score"] = data.pop("score")
+        return data
 
 
 class RecommendationResponse(BaseModel):
-    taste_summary: str
+    taste_summary: str = ""
     recommendations: list[RecommendationItem]

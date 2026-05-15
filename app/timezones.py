@@ -24,15 +24,15 @@ def to_local_str(dt: datetime) -> str:
 
 
 def tonight_range() -> tuple[datetime, datetime]:
-    """Return (start, end) in naive UTC for tonight 18:00 → 02:00 local."""
+    """Return (start, end) in naive UTC for tonight 18:00 → 02:00 local.
+    Start is max(18:00, now) so already-ended shows are excluded."""
     tz = _tz()
     now_local = datetime.now(tz)
-    start_local = now_local.replace(hour=18, minute=0, second=0, microsecond=0)
-    if now_local.hour >= 2:
-        pass  # start is today 18:00
-    else:
-        start_local -= timedelta(days=1)
-    end_local = start_local + timedelta(hours=8)  # 18:00 + 8h = 02:00
+    base_start = now_local.replace(hour=18, minute=0, second=0, microsecond=0)
+    if now_local.hour < 2:
+        base_start -= timedelta(days=1)
+    end_local = base_start + timedelta(hours=8)  # always 02:00
+    start_local = max(base_start, now_local)
     start_utc = start_local.astimezone(timezone.utc).replace(tzinfo=None)
     end_utc = end_local.astimezone(timezone.utc).replace(tzinfo=None)
     return start_utc, end_utc

@@ -31,7 +31,7 @@ class Settings(BaseSettings):
     users_raw: str = "alice:Alice,bob:Bob"
 
     ollama_url: str = "http://localhost:11434"
-    ollama_model: str = "qwen3.5:9b"
+    ollama_model: str = "gemma4:latest"
 
     poll_interval_sec: int = 45
     min_watch_sec: int = 300

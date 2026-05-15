@@ -7,21 +7,19 @@ from config import settings
 
 log = get_logger(__name__)
 
-_TIMEOUT = httpx.Timeout(60.0)
-_OPTIONS = {"num_ctx": 16384, "temperature": 0.3}
+_TIMEOUT = httpx.Timeout(180.0)
+_OPTIONS = {"num_ctx": 8192, "temperature": 0.1}
 
 
 async def ask_json(prompt: str) -> dict | None:
     """POST prompt to Ollama, return parsed JSON dict or None on failure.
 
-    Retries once if the response is not valid JSON, appending the error
-    to the prompt so the model can self-correct.
+    Relies on prompt instructions to produce JSON. Retries once on parse failure.
     """
     payload: dict = {
         "model": settings.ollama_model,
         "prompt": prompt,
         "stream": False,
-        "format": "json",
         "options": _OPTIONS,
     }
     for attempt in range(2):
@@ -29,7 +27,13 @@ async def ask_json(prompt: str) -> dict | None:
             async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
                 r = await client.post(f"{settings.ollama_url}/api/generate", json=payload)
                 r.raise_for_status()
-                raw = r.json().get("response", "")
+                body = r.json()
+                raw = (body.get("response") or "").strip()
+                # Extract JSON object/array from response (strip any surrounding prose)
+                import re as _re
+                m = _re.search(r'\{.*\}', raw, _re.DOTALL)
+                if m:
+                    raw = m.group(0)
                 result = json.loads(raw)
                 log.info("ollama.ok", model=settings.ollama_model, attempt=attempt)
                 return result

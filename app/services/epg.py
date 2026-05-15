@@ -11,7 +11,7 @@ from app.logging_setup import get_logger
 
 log = get_logger(__name__)
 
-_STALE_SECS = 2 * 3600  # 2 hours
+_STALE_SECS = 3 * 3600  # 3 hours
 
 
 async def refresh_now_next(receiver: Receiver, client: EnigmaClient, db: Session) -> int:
@@ -114,7 +114,10 @@ async def refresh_epg_service(channel: Channel, client: EnigmaClient, db: Sessio
                 index_elements=["channel_id", "start_time"],
                 set_={
                     "title": ev.title,
-                    "short_desc": ev.short_desc,
+                    "end_time": ev.end_time,
+                    "duration_sec": ev.duration_sec,
+                    "event_id": ev.event_id,
+                    "genre": ev.genre,
                     "cached_at": now,
                 },
             )
@@ -158,12 +161,7 @@ def get_now_next(channel_ids: list[int], db: Session) -> list[dict]:
             .first()
         )
 
-        stale = False
-        if current and (now - current.cached_at).total_seconds() > _STALE_SECS:
-            stale = True
-        elif not current and not nxt:
-            # No data at all
-            stale = True
+        stale = bool(current and (now - current.cached_at).total_seconds() > _STALE_SECS)
 
         result.append({
             "channel_id": ch.id,
@@ -178,14 +176,20 @@ def get_now_next(channel_ids: list[int], db: Session) -> list[dict]:
     return result
 
 
-def get_epg_range(channel_ids: list[int], start: datetime, end: datetime, db: Session) -> list[dict]:
-    """Return EPG events overlapping [start, end] for the given channels."""
+def get_epg_range(
+    channel_ids: list[int], start: datetime, end: datetime, db: Session,
+    future_only: bool = False,
+) -> list[dict]:
+    """Return EPG events for the given channels in [start, end].
+    future_only=True: only shows that haven't started yet (start_time >= start).
+    future_only=False (default): overlap semantics — includes currently-airing shows."""
+    start_filter = (EpgEvent.start_time >= start) if future_only else (EpgEvent.end_time > start)
     query = (
         db.query(EpgEvent, Channel)
         .join(Channel, EpgEvent.channel_id == Channel.id)
         .filter(
             EpgEvent.start_time < end,
-            EpgEvent.end_time > start,
+            start_filter,
         )
         .order_by(EpgEvent.start_time.asc())
     )

@@ -72,16 +72,25 @@ def compute_profile(user_id: int, db: Session) -> dict:
     ]
     avg_duration_min = round(sum(durations) / max(len(durations), 1) / 60, 1)
 
+    # Preserve stated_preferences across recomputes
+    stated_preferences = None
+    existing = db.get(UserProfile, user_id)
+    if existing:
+        try:
+            stated_preferences = json.loads(existing.summary_json).get("stated_preferences")
+        except Exception:
+            pass
+
     profile = {
         "session_count": total,
         "top_genres": top_genres,
         "top_channels": top_channels,
         "avg_duration_min": avg_duration_min,
         "time_buckets": time_buckets,
+        "stated_preferences": stated_preferences,
     }
 
     now = utcnow()
-    existing = db.get(UserProfile, user_id)
     if existing:
         existing.computed_at = now
         existing.summary_json = json.dumps(profile)
@@ -98,3 +107,24 @@ def get_profile(user_id: int, db: Session) -> dict:
     if cached and (utcnow() - cached.computed_at).total_seconds() < 86400:
         return json.loads(cached.summary_json)
     return compute_profile(user_id, db)
+
+
+def set_stated_preferences(user_id: int, preferences: str, db: Session) -> None:
+    """Store explicit stated preferences. Preserved across profile recomputes."""
+    existing = db.get(UserProfile, user_id)
+    if existing:
+        profile = json.loads(existing.summary_json)
+        profile["stated_preferences"] = preferences
+        existing.summary_json = json.dumps(profile)
+        existing.computed_at = utcnow()
+    else:
+        profile = {
+            "session_count": 0,
+            "top_genres": [],
+            "top_channels": [],
+            "avg_duration_min": 0,
+            "time_buckets": {"morning": 0, "afternoon": 0, "evening": 0, "late": 0},
+            "stated_preferences": preferences,
+        }
+        db.add(UserProfile(user_id=user_id, computed_at=utcnow(), summary_json=json.dumps(profile)))
+    db.commit()
