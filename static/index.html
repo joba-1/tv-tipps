@@ -333,7 +333,7 @@
       </header>
       <h3 x-text="modalEvent?.title"></h3>
       <p><small x-text="formatTime(modalEvent?.start_time) + ' – ' + formatTime(modalEvent?.end_time)"></small></p>
-      <p x-text="modalEvent?.short_desc"></p>
+      <p x-show="modalEvent?.short_desc" x-text="modalEvent?.short_desc"></p>
       <p x-text="modalEvent?.long_desc"
          x-show="modalEvent?.long_desc && modalEvent?.long_desc !== modalEvent?.short_desc"></p>
       <p x-show="modalEvent?.reason" class="modal-reason" x-text="modalEvent?.reason"></p>
