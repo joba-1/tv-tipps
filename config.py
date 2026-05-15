@@ -27,8 +27,8 @@ class Settings(BaseSettings):
     # Format: name:ip:default_user|key=value|key=value,...
     # Pipe-separated flags avoid colon conflict with MAC addresses.
     # Supported flags: priority=<int>, has_genre=true, wol_mac=<MAC>, power_method=wol|intertechno|none
-    receivers_raw: str = "box15:192.168.1.15:alice,box17:192.168.1.17:bob"
-    users_raw: str = "alice:Alice,bob:Bob"
+    receivers_raw: str = ""  # optional bootstrap; manage via Admin UI after first run
+    users_raw: str = ""     # optional bootstrap; manage via Admin UI after first run
 
     ollama_url: str = "http://localhost:11434"
     ollama_model: str = "gemma4:latest"

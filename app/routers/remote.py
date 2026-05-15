@@ -24,16 +24,22 @@ class KeyRequest(BaseModel):
 async def _find_receiver(preferred_name: str | None):
     """Return (rcfg, client) for the best available online receiver."""
     from app.enigma.client import EnigmaClient
-    if preferred_name:
-        rcfg = next((r for r in settings.receivers_by_priority if r.name == preferred_name), None)
-        if rcfg:
+    from app.database import SessionLocal
+    from app.services.receivers import get_receiver_configs, get_receiver_config
+    db = SessionLocal()
+    try:
+        if preferred_name:
+            rcfg = get_receiver_config(preferred_name, db)
+            if rcfg:
+                client = EnigmaClient(rcfg.ip, mock=settings.mock_receivers)
+                if await client.is_online():
+                    return rcfg, client
+        for rcfg in get_receiver_configs(db):
             client = EnigmaClient(rcfg.ip, mock=settings.mock_receivers)
             if await client.is_online():
                 return rcfg, client
-    for rcfg in settings.receivers_by_priority:
-        client = EnigmaClient(rcfg.ip, mock=settings.mock_receivers)
-        if await client.is_online():
-            return rcfg, client
+    finally:
+        db.close()
     return None, None
 
 
@@ -47,7 +53,14 @@ async def zap_to_channel(req: ZapRequest):
 
     # No box reachable → wake first in priority order, poll until online
     if rcfg is None:
-        for r in settings.receivers_by_priority:
+        from app.database import SessionLocal
+        from app.services.receivers import get_receiver_configs
+        _db = SessionLocal()
+        try:
+            _all = get_receiver_configs(_db)
+        finally:
+            _db.close()
+        for r in _all:
             if not await wake_receiver(r):
                 continue
             log.info("remote.waking_receiver", receiver=r.name)

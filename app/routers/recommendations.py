@@ -23,7 +23,10 @@ async def get_recommendations(
     if not user:
         user = db.query(User).first()
     if not user:
-        raise HTTPException(404, "No users configured")
+        return {
+            "context": context, "user_name": "", "taste_summary": "",
+            "recommendations": [], "cached": False, "cold_start": True,
+        }
 
     from app.services.recommendations import get_recommendations as _get
     return await _get(user.id, user.name, context, db)

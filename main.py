@@ -13,22 +13,23 @@ log = get_logger(__name__)
 
 
 def seed_db() -> None:
-    """Create receiver and user rows from config if they don't exist."""
+    """Bootstrap receivers/users from env vars — only when DB has none yet."""
     from datetime import datetime
+    from app.timezones import utcnow
     db = SessionLocal()
     try:
-        for rcfg in settings.receivers:
-            if not db.query(Receiver).filter_by(name=rcfg.name).first():
+        if settings.receivers_raw and db.query(Receiver).count() == 0:
+            for rcfg in settings.receivers:
                 db.add(Receiver(
-                    name=rcfg.name,
-                    ip=rcfg.ip,
-                    default_user=rcfg.default_user,
-                    power_state="unknown",
+                    name=rcfg.name, ip=rcfg.ip, default_user=rcfg.default_user,
+                    location=rcfg.location, priority=rcfg.priority,
+                    power_method=rcfg.power_method, wol_mac=rcfg.wol_mac,
+                    has_genre=rcfg.has_genre, power_state="unknown",
                 ))
                 log.info("db.seeded_receiver", name=rcfg.name)
-        for ucfg in settings.users:
-            if not db.query(User).filter_by(slug=ucfg.slug).first():
-                db.add(User(slug=ucfg.slug, name=ucfg.name, created_at=datetime.utcnow()))
+        if settings.users_raw and db.query(User).count() == 0:
+            for ucfg in settings.users:
+                db.add(User(slug=ucfg.slug, name=ucfg.name, created_at=utcnow()))
                 log.info("db.seeded_user", slug=ucfg.slug)
         db.commit()
     finally:

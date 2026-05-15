@@ -35,3 +35,24 @@ def get_db():
 def init_db():
     from app import models  # noqa: F401 — registers models with Base
     Base.metadata.create_all(bind=engine)
+    _migrate()
+
+
+def _migrate():
+    """Add columns that were introduced after the initial schema."""
+    new_columns = [
+        ("receivers", "location",     "VARCHAR(128) NOT NULL DEFAULT ''"),
+        ("receivers", "priority",     "INTEGER NOT NULL DEFAULT 99"),
+        ("receivers", "power_method", "VARCHAR(16)  NOT NULL DEFAULT 'none'"),
+        ("receivers", "wol_mac",      "VARCHAR(32)"),
+        ("receivers", "has_genre",    "BOOLEAN NOT NULL DEFAULT 0"),
+    ]
+    with engine.connect() as conn:
+        for table, col, definition in new_columns:
+            try:
+                conn.execute(__import__("sqlalchemy").text(
+                    f"ALTER TABLE {table} ADD COLUMN {col} {definition}"
+                ))
+                conn.commit()
+            except Exception:
+                pass  # column already exists

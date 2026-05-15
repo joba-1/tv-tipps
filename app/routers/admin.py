@@ -1,16 +1,15 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from app.database import get_db
-from app.models import Receiver, Channel, EpgEvent
+from app.models import Receiver, Channel, EpgEvent, User
 from app.schemas import AdminStatus, ReceiverStatus
+from app.services.receivers import get_receiver_configs, _to_rcfg
 
 router = APIRouter()
 
 
 def _infer_power_state(online: bool, rcfg, receiver) -> str:
-    """Map online + power_method to a displayable state.
-    Online → trust the receiver's current state; offline → infer from power_method."""
     if online:
         return receiver.power_state if receiver else "unknown"
     if rcfg.power_method == "intertechno":
@@ -20,14 +19,25 @@ def _infer_power_state(online: bool, rcfg, receiver) -> str:
     return receiver.power_state if receiver else "unknown"
 
 
+# ── Receivers ─────────────────────────────────────────────────────────────────
+
+class ReceiverCreateRequest(BaseModel):
+    name: str
+    ip: str
+    location: str = ""
+    priority: int = 99
+    power_method: str = "none"
+    wol_mac: str | None = None
+    has_genre: bool = False
+    default_user: str | None = None
+
+
 @router.get("/api/receivers")
 async def list_receivers(db: Session = Depends(get_db)):
-    """Return configured receivers with current power state and capability flags."""
     from app.enigma.client import EnigmaClient
     from config import settings
-
     result = []
-    for rcfg in settings.receivers_by_priority:
+    for rcfg in get_receiver_configs(db):
         receiver = db.query(Receiver).filter_by(name=rcfg.name).first()
         client = EnigmaClient(rcfg.ip, mock=settings.mock_receivers)
         online = await client.is_online()
@@ -47,11 +57,72 @@ async def list_receivers(db: Session = Depends(get_db)):
     return result
 
 
+@router.post("/api/admin/receivers")
+def create_receiver(req: ReceiverCreateRequest, db: Session = Depends(get_db)):
+    if db.query(Receiver).filter_by(name=req.name).first():
+        raise HTTPException(409, f"Receiver '{req.name}' already exists")
+    r = Receiver(
+        name=req.name, ip=req.ip, location=req.location, priority=req.priority,
+        power_method=req.power_method, wol_mac=req.wol_mac or None,
+        has_genre=req.has_genre, default_user=req.default_user,
+        power_state="unknown",
+    )
+    db.add(r)
+    db.commit()
+    # Add polling job for the new receiver
+    from app.services.poller import _add_poll_job
+    _add_poll_job(req.name)
+    return {"ok": True, "name": req.name}
+
+
+@router.delete("/api/admin/receivers/{name}")
+def delete_receiver(name: str, db: Session = Depends(get_db)):
+    r = db.query(Receiver).filter_by(name=name).first()
+    if not r:
+        raise HTTPException(404, f"Receiver '{name}' not found")
+    from app.services.poller import remove_poll_job
+    remove_poll_job(name)
+    db.delete(r)
+    db.commit()
+    return {"ok": True, "name": name}
+
+
+# ── Users ─────────────────────────────────────────────────────────────────────
+
+class UserCreateRequest(BaseModel):
+    slug: str
+    name: str
+
+
 @router.get("/api/users")
 def list_users(db: Session = Depends(get_db)):
-    from app.models import User
-    return [{"slug": u.slug, "name": u.name} for u in db.query(User).all()]
+    return [{"slug": u.slug, "name": u.name} for u in db.query(User).order_by(User.name).all()]
 
+
+@router.post("/api/admin/users")
+def create_user(req: UserCreateRequest, db: Session = Depends(get_db)):
+    slug = req.slug.strip().lower()
+    if not slug:
+        raise HTTPException(400, "slug must not be empty")
+    if db.query(User).filter_by(slug=slug).first():
+        raise HTTPException(409, f"User '{slug}' already exists")
+    from app.timezones import utcnow
+    db.add(User(slug=slug, name=req.name.strip(), created_at=utcnow()))
+    db.commit()
+    return {"ok": True, "slug": slug}
+
+
+@router.delete("/api/admin/users/{slug}")
+def delete_user(slug: str, db: Session = Depends(get_db)):
+    u = db.query(User).filter_by(slug=slug).first()
+    if not u:
+        raise HTTPException(404, f"User '{slug}' not found")
+    db.delete(u)
+    db.commit()
+    return {"ok": True, "slug": slug}
+
+
+# ── Admin status ──────────────────────────────────────────────────────────────
 
 @router.get("/api/admin/status", response_model=AdminStatus)
 async def admin_status(db: Session = Depends(get_db)):
@@ -59,13 +130,12 @@ async def admin_status(db: Session = Depends(get_db)):
     from config import settings
 
     receiver_statuses = []
-    for rcfg in settings.receivers:
+    for rcfg in get_receiver_configs(db):
         receiver = db.query(Receiver).filter_by(name=rcfg.name).first()
         client = EnigmaClient(rcfg.ip, mock=settings.mock_receivers)
         online = await client.is_online()
         if online:
             power_state = await client.get_power_state()
-            # Refresh DB so list_receivers and other readers see the live state.
             if receiver:
                 receiver.power_state = power_state
         else:
@@ -84,17 +154,12 @@ async def admin_status(db: Session = Depends(get_db)):
                 epg_cached_at = str(row)
 
         receiver_statuses.append(ReceiverStatus(
-            name=rcfg.name,
-            ip=rcfg.ip,
-            online=online,
-            power_state=power_state,
+            name=rcfg.name, ip=rcfg.ip, online=online, power_state=power_state,
             last_seen=receiver.last_seen.isoformat() if receiver and receiver.last_seen else None,
-            epg_cached_at=epg_cached_at,
-            power_method=rcfg.power_method,
-            has_genre=rcfg.has_genre,
-            priority=rcfg.priority,
-            location=rcfg.location,
+            epg_cached_at=epg_cached_at, power_method=rcfg.power_method,
+            has_genre=rcfg.has_genre, priority=rcfg.priority, location=rcfg.location,
         ))
+    db.commit()
 
     return AdminStatus(
         receivers=receiver_statuses,
@@ -105,11 +170,12 @@ async def admin_status(db: Session = Depends(get_db)):
 
 @router.post("/api/admin/refresh")
 async def admin_refresh(target: str = "all"):
-    """Trigger immediate refresh. target: channels | epg | epg_full | all"""
     from app.services.poller import run_refresh
     await run_refresh(target)
     return {"ok": True, "target": target}
 
+
+# ── User preferences ──────────────────────────────────────────────────────────
 
 class UserPreferencesRequest(BaseModel):
     preferences: str
@@ -117,10 +183,8 @@ class UserPreferencesRequest(BaseModel):
 
 @router.get("/api/admin/user-preferences")
 def get_user_preferences(user: str, db: Session = Depends(get_db)):
-    """Return a user's current stated preferences (empty string if none)."""
     import json
-    from app.models import User, UserProfile
-
+    from app.models import UserProfile
     u = db.query(User).filter_by(slug=user).first()
     if not u:
         return {"ok": False, "error": f"unknown user '{user}'"}
@@ -136,10 +200,8 @@ def get_user_preferences(user: str, db: Session = Depends(get_db)):
 
 @router.post("/api/admin/user-preferences")
 def set_user_preferences(user: str, req: UserPreferencesRequest, db: Session = Depends(get_db)):
-    """Set or replace a user's stated preferences. Invalidates recommendation cache."""
-    from app.models import User, RecommendationCache
+    from app.models import RecommendationCache
     from app.services.profile import set_stated_preferences
-
     u = db.query(User).filter_by(slug=user).first()
     if not u:
         return {"ok": False, "error": f"unknown user '{user}'"}
@@ -149,22 +211,18 @@ def set_user_preferences(user: str, req: UserPreferencesRequest, db: Session = D
     return {"ok": True, "user": user}
 
 
+# ── Power control ─────────────────────────────────────────────────────────────
+
 @router.post("/api/admin/power")
-async def admin_power(receiver: str, action: str):
-    """Manual power control. action: wake | sleep"""
-    from config import settings
+async def admin_power(receiver: str, action: str, db: Session = Depends(get_db)):
     from app.services.power import wake_receiver, sleep_receiver
-
-    rcfg = next((r for r in settings.receivers if r.name == receiver), None)
+    rcfg = next((r for r in get_receiver_configs(db) if r.name == receiver), None)
     if not rcfg:
-        known = [r.name for r in settings.receivers]
-        return {"ok": False, "error": f"unknown receiver '{receiver}', known: {known}"}
-
+        raise HTTPException(404, f"Receiver '{receiver}' not found")
     if action == "wake":
         ok = await wake_receiver(rcfg)
     elif action == "sleep":
         ok = await sleep_receiver(rcfg)
     else:
-        return {"ok": False, "error": "action must be 'wake' or 'sleep'"}
-
+        raise HTTPException(400, "action must be 'wake' or 'sleep'")
     return {"ok": ok, "receiver": receiver, "action": action, "power_method": rcfg.power_method}

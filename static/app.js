@@ -51,6 +51,8 @@ function tvApp() {
     prefsDraft: {},      // slug → current textarea value (editable)
     prefsSaved: {},      // slug → last saved value (for dirty detection)
     prefsSaving: null,   // slug currently being saved (disables button)
+    newReceiver: { name: "", ip: "", location: "", priority: 99, power_method: "none", wol_mac: "", has_genre: false },
+    newUser: { slug: "", name: "" },
 
     // Remote control
     remoteMsg: "",
@@ -413,6 +415,77 @@ function tvApp() {
       } catch (_) {
         this.adminMsg = this.t("msg.connect_error");
       }
+    },
+
+    async addReceiver() {
+      try {
+        const body = { ...this.newReceiver };
+        if (!body.wol_mac) delete body.wol_mac;
+        const res = await fetch("/api/admin/receivers", {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+        });
+        const data = await res.json();
+        if (res.ok) {
+          this.adminMsg = `✓ ${data.name} ${this.t("msg.receiver_added")}`;
+          this.newReceiver = { name: "", ip: "", location: "", priority: 99, power_method: "none", wol_mac: "", has_genre: false };
+          await this.loadReceivers();
+        } else {
+          this.adminMsg = `⚠️ ${data.detail || this.t("msg.refresh_error")}`;
+        }
+      } catch (_) { this.adminMsg = this.t("msg.connect_error"); }
+    },
+
+    async deleteReceiver(name) {
+      if (!confirm(`${this.t("msg.confirm_delete")} ${name}?`)) return;
+      try {
+        const res = await fetch(`/api/admin/receivers/${encodeURIComponent(name)}`, { method: "DELETE" });
+        const data = await res.json();
+        if (res.ok) {
+          this.adminMsg = `✓ ${name} ${this.t("msg.deleted")}`;
+          await this.loadReceivers();
+        } else {
+          this.adminMsg = `⚠️ ${data.detail || this.t("msg.refresh_error")}`;
+        }
+      } catch (_) { this.adminMsg = this.t("msg.connect_error"); }
+    },
+
+    async addUser() {
+      try {
+        const res = await fetch("/api/admin/users", {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(this.newUser),
+        });
+        const data = await res.json();
+        if (res.ok) {
+          this.adminMsg = `✓ ${this.newUser.name} ${this.t("msg.user_added")}`;
+          this.newUser = { slug: "", name: "" };
+          await this.loadUsers();
+        } else {
+          this.adminMsg = `⚠️ ${data.detail || this.t("msg.refresh_error")}`;
+        }
+      } catch (_) { this.adminMsg = this.t("msg.connect_error"); }
+    },
+
+    async deleteUser(slug) {
+      if (!confirm(`${this.t("msg.confirm_delete")} ${slug}?`)) return;
+      try {
+        const res = await fetch(`/api/admin/users/${encodeURIComponent(slug)}`, { method: "DELETE" });
+        const data = await res.json();
+        if (res.ok) {
+          this.adminMsg = `✓ ${slug} ${this.t("msg.deleted")}`;
+          await this.loadUsers();
+        } else {
+          this.adminMsg = `⚠️ ${data.detail || this.t("msg.refresh_error")}`;
+        }
+      } catch (_) { this.adminMsg = this.t("msg.connect_error"); }
+    },
+
+    async loadUsers() {
+      try {
+        const res = await fetch("/api/users");
+        if (res.ok) this.users = await res.json();
+      } catch (_) {}
     },
 
     // ── Remote control ───────────────────────────────────────────────────────

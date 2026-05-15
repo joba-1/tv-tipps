@@ -234,34 +234,91 @@
     </div>
     <p x-show="adminMsg" x-text="adminMsg" class="admin-msg"></p>
 
-    <div class="admin-receivers">
-      <template x-for="r in receivers" :key="r.name">
-        <article class="admin-receiver-card">
-          <header>
-            <span class="receiver-badge"
-                  :class="r.online ? (r.power_state==='on' ? 'online' : 'standby') : (r.power_state==='off' ? 'off' : 'offline')">
-              <span x-text="r.location || r.name"></span>
-            </span>
-            <small x-text="r.name + ' · ' + r.ip"></small>
-            <small x-text="r.power_state"></small>
-          </header>
-          <div class="admin-receiver-flags">
-            <span x-show="r.has_genre" class="flag-badge">genre</span>
-            <span x-text="t('label.prio', { n: r.priority })" class="flag-badge"></span>
-            <span x-text="r.power_method" class="flag-badge"></span>
-          </div>
-          <footer>
-            <button class="outline" @click="receiverPower(r.name, 'wake')"
-                    x-show="r.power_method !== 'none'"
-                    x-text="t('btn.wake')"></button>
-            <button class="outline secondary" @click="receiverPower(r.name, 'sleep')"
-                    x-show="r.power_method !== 'none'"
-                    x-text="t('btn.sleep')"></button>
-          </footer>
-        </article>
-      </template>
+    <!-- Receivers list + add form -->
+    <div class="admin-section">
+      <h3 x-text="t('label.admin_receivers_heading')"></h3>
+      <div class="admin-receivers">
+        <template x-for="r in receivers" :key="r.name">
+          <article class="admin-receiver-card">
+            <header>
+              <span class="receiver-badge"
+                    :class="r.online ? (r.power_state==='on' ? 'online' : 'standby') : (r.power_state==='off' ? 'off' : 'offline')">
+                <span x-text="r.location || r.name"></span>
+              </span>
+              <small x-text="r.name + ' · ' + r.ip"></small>
+              <small x-text="r.power_state"></small>
+            </header>
+            <div class="admin-receiver-flags">
+              <span x-show="r.has_genre" class="flag-badge">genre</span>
+              <span x-text="t('label.prio', { n: r.priority })" class="flag-badge"></span>
+              <span x-text="r.power_method" class="flag-badge"></span>
+            </div>
+            <footer>
+              <button class="outline" @click="receiverPower(r.name, 'wake')"
+                      x-show="r.power_method !== 'none'"
+                      x-text="t('btn.wake')"></button>
+              <button class="outline secondary" @click="receiverPower(r.name, 'sleep')"
+                      x-show="r.power_method !== 'none'"
+                      x-text="t('btn.sleep')"></button>
+              <button class="outline secondary admin-delete-btn" @click="deleteReceiver(r.name)"
+                      x-text="t('btn.delete')"></button>
+            </footer>
+          </article>
+        </template>
+      </div>
+
+      <!-- Add receiver form -->
+      <details class="admin-add-form">
+        <summary x-text="t('label.add_receiver')"></summary>
+        <div class="admin-add-fields">
+          <label x-text="t('label.receiver_name')"><input x-model="newReceiver.name" placeholder="box1"></label>
+          <label x-text="t('label.receiver_ip')"><input x-model="newReceiver.ip" placeholder="192.168.1.15"></label>
+          <label x-text="t('label.receiver_location')"><input x-model="newReceiver.location" placeholder="Wohnzimmer"></label>
+          <label x-text="t('label.receiver_priority')"><input type="number" x-model.number="newReceiver.priority" min="1" max="99"></label>
+          <label x-text="t('label.receiver_power_method')">
+            <select x-model="newReceiver.power_method">
+              <option value="none">none</option>
+              <option value="wol">wol</option>
+              <option value="intertechno">intertechno</option>
+            </select>
+          </label>
+          <label x-show="newReceiver.power_method === 'wol'" x-text="t('label.receiver_wol_mac')">
+            <input x-model="newReceiver.wol_mac" placeholder="00:11:22:33:44:55">
+          </label>
+          <label x-text="t('label.receiver_has_genre')">
+            <input type="checkbox" role="switch" x-model="newReceiver.has_genre">
+          </label>
+          <button @click="addReceiver()" :disabled="!newReceiver.name || !newReceiver.ip"
+                  x-text="t('btn.add')"></button>
+        </div>
+      </details>
     </div>
 
+    <!-- Users list + add form -->
+    <div class="admin-section">
+      <h3 x-text="t('label.admin_users_heading')"></h3>
+      <div class="admin-users">
+        <template x-for="u in users" :key="u.slug">
+          <div class="admin-user-row">
+            <strong x-text="u.name"></strong>
+            <small x-text="u.slug"></small>
+            <button class="outline secondary admin-delete-btn" @click="deleteUser(u.slug)"
+                    x-text="t('btn.delete')"></button>
+          </div>
+        </template>
+      </div>
+      <details class="admin-add-form">
+        <summary x-text="t('label.add_user')"></summary>
+        <div class="admin-add-fields">
+          <label x-text="t('label.user_slug')"><input x-model="newUser.slug" placeholder="alice"></label>
+          <label x-text="t('label.user_name')"><input x-model="newUser.name" placeholder="Alice"></label>
+          <button @click="addUser()" :disabled="!newUser.slug || !newUser.name"
+                  x-text="t('btn.add')"></button>
+        </div>
+      </details>
+    </div>
+
+    <!-- Preferences -->
     <div class="admin-prefs">
       <h3 x-text="t('label.prefs_heading')"></h3>
       <template x-for="u in users" :key="u.slug">

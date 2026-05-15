@@ -89,16 +89,7 @@ if [[ ! -f "$ENV_FILE" ]]; then
     cat > "$ENV_FILE" <<EOF
 # tv-tips configuration — edit before starting the service
 # Restart the service after changes: systemctl restart tv-tips
-
-# ── Receivers ────────────────────────────────────────────────────────────────
-# Format: name:ip:default_user[|flag=value ...]
-# Flags: priority=<int>  has_genre=true  wol_mac=<MAC>
-#        power_method=wol|intertechno|none  location=<room>
-RECEIVERS_RAW=box1:192.168.1.15:alice|priority=1|location=Living room,box2:192.168.1.17:bob|priority=2|location=Bedroom
-
-# ── Users ────────────────────────────────────────────────────────────────────
-# Format: slug:Display Name, comma-separated
-USERS_RAW=alice:Alice,bob:Bob
+# Add receivers and users via the Admin page in the web UI.
 
 # ── Ollama ───────────────────────────────────────────────────────────────────
 OLLAMA_URL=http://localhost:11434
@@ -169,10 +160,9 @@ echo "✓ tv-tips v${VERSION} installed and started on port ${PORT}"
 echo
 echo "Next steps:"
 echo "  1. Edit config:   $ENV_FILE"
-echo "     - Set RECEIVERS_RAW with your receiver IPs, users, and room names"
-echo "     - Set USERS_RAW with your household users (slug:Display Name)"
 echo "     - Set OLLAMA_MODEL to a model you have pulled (ollama pull qwen3.5:9b)"
 echo "     - Adjust TIMEZONE to your local timezone"
+echo "     - Optionally set INTERTECHNO_URL if using an RF power switch"
 echo "  2. Restart after config changes:"
 echo "     sudo systemctl restart tv-tips"
 echo "  3. Open in browser:"

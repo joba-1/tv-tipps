@@ -13,6 +13,11 @@ class Receiver(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     name: Mapped[str] = mapped_column(String(32), unique=True, nullable=False)
     ip: Mapped[str] = mapped_column(String(64), nullable=False)
+    location: Mapped[str] = mapped_column(String(128), nullable=False, default="", server_default="")
+    priority: Mapped[int] = mapped_column(Integer, nullable=False, default=99, server_default="99")
+    power_method: Mapped[str] = mapped_column(String(16), nullable=False, default="none", server_default="none")
+    wol_mac: Mapped[str | None] = mapped_column(String(32))
+    has_genre: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="0")
     default_user: Mapped[str | None] = mapped_column(String(64))
     power_state: Mapped[str | None] = mapped_column(String(32))  # on|standby|deep_standby|unknown
     last_seen: Mapped[datetime | None] = mapped_column()

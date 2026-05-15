@@ -42,10 +42,8 @@ async def _poll_receiver(receiver_name: str) -> None:
         if not receiver:
             return
 
-        rcfg = next((r for r in settings.receivers if r.name == receiver_name), None)
-        if not rcfg:
-            return
-
+        from app.services.receivers import _to_rcfg
+        rcfg = _to_rcfg(receiver)
         client = EnigmaClient(rcfg.ip, mock=settings.mock_receivers)
         state = _get_state(receiver_name)
         now = datetime.utcnow()
@@ -187,40 +185,29 @@ def _close_session(state: dict, ended_at: datetime, db: Session) -> None:
     state["confirmed"] = False
 
 
-async def _find_best_receiver(db) -> tuple | None:
-    """Return (receiver, client) in priority order; prefer has_genre=True for full EPG."""
-    for rcfg in settings.receivers_by_priority:
-        receiver = db.query(Receiver).filter_by(name=rcfg.name).first()
-        if not receiver:
-            continue
-        client = EnigmaClient(rcfg.ip, mock=settings.mock_receivers)
-        if await client.is_online():
-            return receiver, client
-    return None
-
-
 async def _refresh_all_epg(full: bool = False) -> None:
     """Refresh EPG from the best available receiver.
     Tries all online receivers for now/next; uses best one for full service fetch.
     """
     db = SessionLocal()
     try:
+        from app.services.receivers import get_receiver_configs
+        receivers_cfg = get_receiver_configs(db)
         best = None
-        for rcfg in settings.receivers_by_priority:
+        for rcfg in receivers_cfg:
             receiver = db.query(Receiver).filter_by(name=rcfg.name).first()
             if not receiver:
                 continue
             client = EnigmaClient(rcfg.ip, mock=settings.mock_receivers)
             if await client.is_online():
                 await refresh_now_next(receiver, client, db)
-                # Prefer receiver with genre data as source for full EPG fetch
                 if best is None or rcfg.has_genre:
-                    best = (receiver, client)
+                    best = (receiver, client, rcfg)
             else:
                 log.info("epg.receiver_offline_skip", receiver=rcfg.name)
 
         if full and best:
-            receiver, client = best
+            receiver, client, _ = best
             from app.models import Channel, BouquetChannel, Bouquet
             from app.services.epg import refresh_epg_service
             bouquet_ids = [b.id for b in db.query(Bouquet).filter_by(receiver_id=receiver.id).all()]
@@ -242,7 +229,8 @@ async def _refresh_all_epg(full: bool = False) -> None:
 async def _refresh_all_channels() -> None:
     db = SessionLocal()
     try:
-        for rcfg in settings.receivers:
+        from app.services.receivers import get_receiver_configs
+        for rcfg in get_receiver_configs(db):
             receiver = db.query(Receiver).filter_by(name=rcfg.name).first()
             if not receiver:
                 continue
@@ -273,20 +261,40 @@ async def run_refresh(target: str) -> None:
         await _refresh_all_epg(full=full)
 
 
+def _add_poll_job(name: str, delay_sec: int = 0) -> None:
+    job_id = f"poll_{name}"
+    if scheduler.get_job(job_id):
+        return
+    scheduler.add_job(
+        _poll_receiver,
+        "interval",
+        seconds=settings.poll_interval_sec,
+        start_date=f"2000-01-01 00:00:{delay_sec:02d}",
+        args=[name],
+        id=job_id,
+        max_instances=1,
+        coalesce=True,
+    )
+    log.info("scheduler.poll_job_added", receiver=name)
+
+
+def remove_poll_job(name: str) -> None:
+    job_id = f"poll_{name}"
+    if scheduler.get_job(job_id):
+        scheduler.remove_job(job_id)
+        log.info("scheduler.poll_job_removed", receiver=name)
+
+
 def start_scheduler() -> None:
     """Register all jobs and start the scheduler."""
-    for i, rcfg in enumerate(settings.receivers):
-        delay = i * 10  # stagger polls between boxes
-        scheduler.add_job(
-            _poll_receiver,
-            "interval",
-            seconds=settings.poll_interval_sec,
-            start_date=f"2000-01-01 00:00:{delay:02d}",
-            args=[rcfg.name],
-            id=f"poll_{rcfg.name}",
-            max_instances=1,
-            coalesce=True,
-        )
+    from app.database import SessionLocal as _SL
+    db = _SL()
+    try:
+        from app.services.receivers import get_receiver_configs
+        for i, rcfg in enumerate(get_receiver_configs(db)):
+            _add_poll_job(rcfg.name, delay_sec=i * 10)
+    finally:
+        db.close()
 
     scheduler.add_job(
         _refresh_all_epg,
@@ -296,7 +304,6 @@ def start_scheduler() -> None:
         max_instances=1,
         coalesce=True,
     )
-
     scheduler.add_job(
         lambda: _refresh_all_epg(full=True),
         "cron",
@@ -306,7 +313,6 @@ def start_scheduler() -> None:
         max_instances=1,
         coalesce=True,
     )
-
     scheduler.add_job(
         _refresh_all_channels,
         "interval",
@@ -315,7 +321,6 @@ def start_scheduler() -> None:
         max_instances=1,
         coalesce=True,
     )
-
     scheduler.add_job(
         _cleanup_epg,
         "cron",
@@ -323,6 +328,5 @@ def start_scheduler() -> None:
         minute=0,
         id="cleanup_epg",
     )
-
     scheduler.start()
     log.info("scheduler.started")
