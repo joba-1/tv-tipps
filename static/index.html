@@ -36,8 +36,8 @@
         <template x-for="r in receivers" :key="r.name">
           <span class="receiver-badge"
                 :class="r.online ? (r.power_state==='on' ? 'online' : 'standby') : 'offline'"
-                :title="r.name + ' · ' + r.power_state">
-            <span x-text="r.name"></span>
+                :title="r.name + ' · ' + r.power_state + (r.location ? ' · ' + r.location : '')">
+            <span x-text="r.location || r.name"></span>
           </span>
         </template>
       </li>
@@ -217,9 +217,9 @@
           <header>
             <span class="receiver-badge"
                   :class="r.online ? (r.power_state==='on' ? 'online' : 'standby') : 'offline'">
-              <span x-text="r.name"></span>
+              <span x-text="r.location || r.name"></span>
             </span>
-            <small x-text="r.ip"></small>
+            <small x-text="r.name + ' · ' + r.ip"></small>
             <small x-text="r.power_state"></small>
           </header>
           <div class="admin-receiver-flags">

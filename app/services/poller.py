@@ -151,8 +151,8 @@ def _confirm_session(state: dict, receiver: Receiver, db: Session) -> None:
         user = db.query(User).filter_by(slug=receiver.default_user).first()
         if user:
             session.user_id = user.id
-            session.confidence = 0.6
-            session.attribution_method = "default"
+            session.confidence = 0.4   # IR remote: primary user but not exclusive
+            session.attribution_method = "location_heuristic"
 
     # Link EPG event — at slot boundaries multiple events may overlap; pick the most recent start.
     channel = db.get(Channel, session.channel_id)

@@ -24,6 +24,7 @@ async def list_receivers(db: Session = Depends(get_db)):
             "priority": rcfg.priority,
             "has_genre": rcfg.has_genre,
             "power_method": rcfg.power_method,
+            "location": rcfg.location,
             "online": online,
             "power_state": receiver.power_state if receiver else "unknown",
             "last_seen": receiver.last_seen.isoformat() if receiver and receiver.last_seen else None,
@@ -72,6 +73,7 @@ async def admin_status(db: Session = Depends(get_db)):
             power_method=rcfg.power_method,
             has_genre=rcfg.has_genre,
             priority=rcfg.priority,
+            location=rcfg.location,
         ))
 
     return AdminStatus(

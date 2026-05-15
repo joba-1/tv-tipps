@@ -50,6 +50,7 @@ class ReceiverStatus(BaseModel):
     power_method: str = "none"
     has_genre: bool = False
     priority: int = 99
+    location: str = ""
 
 
 class AdminStatus(BaseModel):

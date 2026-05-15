@@ -7,11 +7,12 @@ from dataclasses import dataclass, field
 class ReceiverConfig:
     name: str
     ip: str
-    default_user: str
+    default_user: str           # primary IR remote user (low-confidence heuristic only)
     priority: int = 99          # lower = preferred for EPG source selection
     has_genre: bool = False     # True if OWIF firmware provides genre strings
     wol_mac: str | None = None  # if set, WOL wake is supported
     power_method: str = "none"  # "wol" | "intertechno" | "none"
+    location: str = ""          # human-readable room name, e.g. "Wohnzimmer"
 
 
 @dataclass
@@ -81,6 +82,8 @@ class Settings(BaseSettings):
                     rcfg.wol_mac = v
                 elif k == "power_method":
                     rcfg.power_method = v.lower()
+                elif k == "location":
+                    rcfg.location = v
             result.append(rcfg)
         return result
 
