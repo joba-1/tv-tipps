@@ -308,9 +308,10 @@
       </div><!-- /remote-body -->
 
       <!-- Screenshot feedback -->
-      <div class="remote-screenshot-wrap" x-show="remoteScreenshotUrl">
-        <img class="remote-screenshot" :src="remoteScreenshotUrl" alt="TV"
-             @error="remoteScreenshotUrl = ''" />
+      <div class="remote-screenshot-wrap">
+        <img class="remote-screenshot" :src="remoteScreenshotUrl || ''" alt="TV"
+             x-show="remoteScreenshotUrl" />
+        <div class="remote-screenshot-placeholder" x-show="!remoteScreenshotUrl">📺</div>
       </div>
     </div><!-- /remote-wrap -->
   </main>

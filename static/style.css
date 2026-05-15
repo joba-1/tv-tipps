@@ -448,10 +448,17 @@ button.close { background: none; border: none; font-size: 1.2rem; padding: 0; cu
   border-radius: 8px;
   overflow: hidden;
   background: #000;
+  min-height: 60px;
 }
 .remote-screenshot {
   width: 100%;
   display: block;
+}
+.remote-screenshot-placeholder {
+  text-align: center;
+  font-size: 2rem;
+  padding: 1rem;
+  color: var(--pico-muted-color);
 }
 
 .remote-feedback {

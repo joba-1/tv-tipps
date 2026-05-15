@@ -121,7 +121,7 @@ class EnigmaClient:
             async with httpx.AsyncClient(timeout=httpx.Timeout(10.0)) as client:
                 r = await client.get(
                     f"{self.base_url}/grab",
-                    params={"format": "jpg", "resize": "0"},
+                    params={"o": "jpg"},
                 )
                 r.raise_for_status()
                 return r.content
