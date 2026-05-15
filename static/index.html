@@ -272,7 +272,7 @@
                       :placeholder="t('label.prefs_placeholder')"></textarea>
           </label>
           <button class="outline" @click="savePreferences(u.slug)"
-                  :disabled="prefsSaving === u.slug" x-text="t('btn.prefs_save')"></button>
+                  :disabled="prefsSaving === u.slug || !prefsChanged(u.slug)" x-text="t('btn.prefs_save')"></button>
         </div>
       </template>
     </div>

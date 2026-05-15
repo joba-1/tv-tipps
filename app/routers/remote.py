@@ -65,7 +65,7 @@ async def zap_to_channel(req: ZapRequest):
 
     ok = await client.zap(req.sref)
     log.info("remote.zap", receiver=rcfg.name, sref=req.sref, ok=ok)
-    return {"ok": ok, "receiver_name": rcfg.name, "sref": req.sref, "woke": woke}
+    return {"ok": ok, "receiver_name": rcfg.name, "receiver_location": rcfg.location or rcfg.name, "sref": req.sref, "woke": woke}
 
 
 @router.post("/api/remote/key")

@@ -48,7 +48,8 @@ function tvApp() {
     adminStatus: null,
     adminRefreshing: false,
     adminMsg: "",
-    prefsDraft: {},      // slug → current textarea value
+    prefsDraft: {},      // slug → current textarea value (editable)
+    prefsSaved: {},      // slug → last saved value (for dirty detection)
     prefsSaving: null,   // slug currently being saved (disables button)
 
     // Remote control
@@ -204,9 +205,10 @@ function tvApp() {
         });
         const data = await res.json();
         if (data.ok) {
+          const receiverLabel = data.receiver_location || data.receiver_name;
           this._toast(data.woke
-            ? this.t("msg.zap_woke", { receiver: data.receiver_name })
-            : this.t("msg.zap_ok",   { receiver: data.receiver_name })
+            ? this.t("msg.zap_woke", { receiver: receiverLabel })
+            : this.t("msg.zap_ok",   { receiver: receiverLabel })
           );
         } else {
           this._toast(this.t("msg.zap_fail"));
@@ -345,6 +347,11 @@ function tvApp() {
         } catch (_) {}
       }));
       this.prefsDraft = { ...this.prefsDraft, ...updated };
+      this.prefsSaved = { ...this.prefsSaved, ...updated };
+    },
+
+    prefsChanged(slug) {
+      return (this.prefsDraft[slug] ?? "") !== (this.prefsSaved[slug] ?? "");
     },
 
     async savePreferences(slug) {
@@ -360,7 +367,10 @@ function tvApp() {
         this.adminMsg = data.ok
           ? this.t("msg.prefs_saved", { name: user?.name || slug })
           : this.t("msg.prefs_error");
-        if (data.ok && this.recsData) this.recsData = null;  // force refresh next view
+        if (data.ok) {
+          this.prefsSaved[slug] = this.prefsDraft[slug] ?? "";
+          if (this.recsData) this.recsData = null;
+        }
       } catch (_) {
         this.adminMsg = this.t("msg.prefs_error");
       } finally {
