@@ -589,7 +589,6 @@ function tvApp() {
         clearInterval(this._remoteScreenshotTimer);
         this._remoteScreenshotTimer = null;
       }
-      this.remoteScreenshotUrl = "";
     },
 
     toggleScreenshotPoll() {
