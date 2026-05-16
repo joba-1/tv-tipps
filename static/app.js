@@ -654,11 +654,11 @@ function tvApp() {
     isLive(event) {
       if (!event) return false;
       if (typeof event.progress_pct === "number" && event.progress_pct > 0) return true;
-      if (!event.start_time || !event.end_time) return false;
+      const start = this._parseEventTime(event.start_time);
+      const end   = this._parseEventTime(event.end_time);
+      if (!start || !end) return false;
       const now = Date.now();
-      const start = new Date(event.start_time + "Z").getTime();
-      const end   = new Date(event.end_time   + "Z").getTime();
-      return start <= now && now < end;
+      return start.getTime() <= now && now < end.getTime();
     },
 
     showDetail(event, channelName, sref = null) {
@@ -677,9 +677,25 @@ function tvApp() {
       return best ? `http://${best.ip}${piconPath}` : "";
     },
 
+    _parseEventTime(s) {
+      // Accepts:
+      //   "2026-05-16T10:55:00"        → naive UTC (server ISO, no offset)
+      //   "2026-05-16T10:55:00Z"       → explicit UTC
+      //   "2026-05-16T10:55:00+02:00"  → with offset
+      //   "2026-05-16 10:55"           → legacy: already in server-local time
+      if (!s) return null;
+      if (s.includes("T")) {
+        const hasTz = /[Zz]|[+-]\d{2}:?\d{2}$/.test(s);
+        return new Date(hasTz ? s : s + "Z");
+      }
+      // Legacy space-separated, treat as local — preserves correct display for
+      // stale recommendation cache entries written before the API was switched to ISO UTC.
+      return new Date(s.replace(" ", "T"));
+    },
+
     formatTime(isoStr) {
-      if (!isoStr) return "";
-      const d = new Date(isoStr + "Z");
+      const d = this._parseEventTime(isoStr);
+      if (!d || isNaN(d.getTime())) return "";
       return d.toLocaleTimeString(this.lang, { hour: "2-digit", minute: "2-digit" });
     },
 
