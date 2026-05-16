@@ -55,6 +55,9 @@ function tvApp() {
     newReceiver: { name: "", ip: "", location: "", priority: 99, power_method: "none", wol_mac: "", intertechno_family: "", intertechno_device: 1, has_genre: false },
     newUser: { slug: "", name: "" },
 
+    // Receiver auto-deselect
+    _receiverStandbyAt: null,
+
     // Remote control
     remoteMsg: "",
     _remoteMsgTimer: null,
@@ -180,6 +183,21 @@ function tvApp() {
         // Keep selectedReceiver in sync when receivers list refreshes
         if (this.selectedReceiver) {
           this.selectedReceiver = this.receivers.find(r => r.name === this.selectedReceiver.name) || null;
+        }
+        // Auto-deselect receiver if it has been inactive for 30 minutes
+        if (this.selectedReceiver) {
+          const isActive = this.selectedReceiver.online && this.selectedReceiver.power_state === "on";
+          if (!isActive) {
+            if (!this._receiverStandbyAt) this._receiverStandbyAt = Date.now();
+            else if (Date.now() - this._receiverStandbyAt > 30 * 60 * 1000) {
+              this.setReceiver(null);
+              this._receiverStandbyAt = null;
+            }
+          } else {
+            this._receiverStandbyAt = null;
+          }
+        } else {
+          this._receiverStandbyAt = null;
         }
       } catch (_) {}
     },
