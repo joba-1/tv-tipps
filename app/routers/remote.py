@@ -76,6 +76,12 @@ async def zap_to_channel(req: ZapRequest):
     if rcfg is None or client is None:
         raise HTTPException(503, "No receiver available")
 
+    # Wake from light standby before zapping
+    if not woke and await client.get_power_state() == "standby":
+        await client.send_key("power")
+        await asyncio.sleep(3)
+        woke = True
+
     ok = await client.zap(req.sref)
     log.info("remote.zap", receiver=rcfg.name, sref=req.sref, ok=ok)
     return {"ok": ok, "receiver_name": rcfg.name, "receiver_location": rcfg.location or rcfg.name, "sref": req.sref, "woke": woke}
