@@ -124,10 +124,13 @@ class EnigmaClient:
 
     async def add_timer(
         self, sref: str, begin: int, end: int, name: str,
-        description: str = "", justplay: int = 0,
-    ) -> bool:
+        description: str = "", justplay: int = 0, eit: int | None = None,
+    ) -> dict | None:
         """Schedule a recording timer via OpenWebif /api/timeradd.
-        `begin`/`end` are unix epoch seconds. `justplay=0` records, `1` just zaps."""
+        `begin`/`end` are unix epoch seconds. `justplay=0` records, `1` just zaps.
+        Passing `eit` (EPG event id) helps OWIF bind the timer to the real EPG
+        slot, which avoids the "manual timer didn't match an event" failure mode
+        that's common when the timer window is padded around the broadcast."""
         params = {
             "sRef": sref,
             "begin": str(begin),
@@ -139,8 +142,9 @@ class EnigmaClient:
             "disabled": "0",
             "justplay": str(justplay),
         }
-        data = await self._get("/api/timeradd", params=params)
-        return bool(data and data.get("result"))
+        if eit is not None:
+            params["eit"] = str(eit)
+        return await self._get("/api/timeradd", params=params)
 
     async def send_key(self, key_name: str) -> bool:
         code = RC_KEYS.get(key_name)

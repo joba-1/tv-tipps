@@ -379,6 +379,7 @@ function tvApp() {
           end_time: this.modalEvent.end_time,
           title: this.modalEvent.title || "",
           short_desc: this.modalEvent.short_desc || "",
+          event_id: this.modalEvent.event_id ?? null,
         };
         if (this.selectedReceiver) body.receiver = this.selectedReceiver.name;
         const res = await fetch("/api/remote/record", {
@@ -393,7 +394,10 @@ function tvApp() {
           // Re-fetch the timer list so the badge shows up right away.
           this.loadTimers();
         } else {
-          this._toast(this.t("msg.record_fail"));
+          // Surface the OWIF reason (often "conflict with…" or "no event matched"),
+          // which is what actually changes between retries.
+          const reason = data.message ? ` — ${data.message}` : "";
+          this._toast(this.t("msg.record_fail") + reason);
         }
       } catch (_) {
         this._toast(this.t("msg.connect_error"));

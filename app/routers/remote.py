@@ -27,6 +27,7 @@ class TimerRequest(BaseModel):
     end_time: str     # naive UTC ISO
     title: str
     short_desc: str | None = None
+    event_id: int | None = None   # EPG eit — helps OWIF bind the timer reliably
     receiver: str | None = None
 
 
@@ -158,14 +159,19 @@ async def add_record_timer(req: TimerRequest):
     begin_ts = int(start.replace(tzinfo=timezone.utc).timestamp()) - 120
     end_ts = int(end.replace(tzinfo=timezone.utc).timestamp()) + 300
 
-    ok = await client.add_timer(
+    resp = await client.add_timer(
         sref=req.sref, begin=begin_ts, end=end_ts,
         name=req.title, description=req.short_desc or "",
+        eit=req.event_id,
     )
-    log.info("remote.record", receiver=rcfg.name, sref=req.sref,
-             title=req.title, ok=ok)
+    ok = bool(resp and resp.get("result"))
+    msg = (resp or {}).get("message", "") or ""
+    log.info("remote.record",
+             receiver=rcfg.name, sref=req.sref, title=req.title,
+             eit=req.event_id, ok=ok, owif_message=msg)
     return {
         "ok": ok,
+        "message": msg,
         "receiver_name": rcfg.name,
         "receiver_location": rcfg.location or rcfg.name,
     }
