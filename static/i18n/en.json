@@ -55,6 +55,8 @@
   "msg.prefs_error": "⚠️ Save failed",
   "btn.like": "👍 Like",
   "btn.unlike": "✓ Liked",
+  "btn.dislike": "👎 Dislike",
+  "btn.undislike": "✗ Disliked",
   "btn.add": "Add",
   "btn.delete": "Delete",
   "label.admin_receivers_heading": "Receivers",

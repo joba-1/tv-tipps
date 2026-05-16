@@ -1,4 +1,4 @@
-"""User likes: thumb-up an EPG event to feed positive signal into recommendations."""
+"""User reactions (like/dislike) on EPG events to feed signal into recommendations."""
 from __future__ import annotations
 from fastapi import APIRouter, Cookie, Depends, HTTPException
 from pydantic import BaseModel
@@ -12,6 +12,7 @@ router = APIRouter()
 
 class LikeToggleRequest(BaseModel):
     epg_event_id: int
+    sentiment: str = "like"  # "like" | "dislike"
 
 
 def _current_user(slug: str | None, db: Session) -> User | None:
@@ -41,6 +42,7 @@ def list_likes(
             "title": r.title,
             "channel_name": r.channel_name,
             "genre": r.genre,
+            "sentiment": r.sentiment,
             "created_at": r.created_at.isoformat(),
         }
         for r in rows
@@ -56,6 +58,8 @@ def toggle_like(
     user = _current_user(tv_tips_user, db)
     if not user:
         raise HTTPException(401, "No user cookie set")
+    if req.sentiment not in ("like", "dislike"):
+        raise HTTPException(400, "sentiment must be 'like' or 'dislike'")
 
     existing = (
         db.query(UserLike)
@@ -63,10 +67,19 @@ def toggle_like(
         .first()
     )
     if existing:
-        db.delete(existing)
-        db.query(RecommendationCache).filter_by(user_id=user.id).delete()
-        db.commit()
-        return {"liked": False, "epg_event_id": req.epg_event_id}
+        if existing.sentiment == req.sentiment:
+            # same button pressed again → undo
+            db.delete(existing)
+            db.query(RecommendationCache).filter_by(user_id=user.id).delete()
+            db.commit()
+            return {"liked": False, "disliked": False, "epg_event_id": req.epg_event_id}
+        else:
+            # switched sentiment → update in place
+            existing.sentiment = req.sentiment
+            db.query(RecommendationCache).filter_by(user_id=user.id).delete()
+            db.commit()
+            return {"liked": req.sentiment == "like", "disliked": req.sentiment == "dislike",
+                    "epg_event_id": req.epg_event_id}
 
     event = db.get(EpgEvent, req.epg_event_id)
     if not event:
@@ -78,8 +91,10 @@ def toggle_like(
         title=event.title,
         channel_name=channel.name if channel else None,
         genre=event.genre,
+        sentiment=req.sentiment,
         created_at=utcnow(),
     ))
     db.query(RecommendationCache).filter_by(user_id=user.id).delete()
     db.commit()
-    return {"liked": True, "epg_event_id": req.epg_event_id}
+    return {"liked": req.sentiment == "like", "disliked": req.sentiment == "dislike",
+            "epg_event_id": req.epg_event_id}

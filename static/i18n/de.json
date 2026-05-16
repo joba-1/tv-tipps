@@ -55,6 +55,8 @@
   "msg.prefs_error": "⚠️ Speichern fehlgeschlagen",
   "btn.like": "👍 Gefällt mir",
   "btn.unlike": "✓ Gefällt mir",
+  "btn.dislike": "👎 Gefällt nicht",
+  "btn.undislike": "✗ Gefällt nicht",
   "btn.add": "Hinzufügen",
   "btn.delete": "Löschen",
   "label.admin_receivers_heading": "Geräte",

@@ -430,6 +430,9 @@
         <button :class="likedIds.has(modalEvent?.id) ? 'like-btn liked' : 'like-btn outline'"
                 @click="toggleLike(modalEvent?.id)"
                 x-text="likedIds.has(modalEvent?.id) ? t('btn.unlike') : t('btn.like')"></button>
+        <button :class="dislikedIds.has(modalEvent?.id) ? 'dislike-btn disliked' : 'dislike-btn outline'"
+                @click="toggleDislike(modalEvent?.id)"
+                x-text="dislikedIds.has(modalEvent?.id) ? t('btn.undislike') : t('btn.dislike')"></button>
       </footer>
     </article>
   </dialog>

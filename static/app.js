@@ -38,8 +38,9 @@ function tvApp() {
     epgSearchQuery: "",
     _epgSearchTimer: null,
 
-    // Likes
+    // Likes / dislikes
     likedIds: new Set(),
+    dislikedIds: new Set(),
 
     // Receivers
     receivers: [],
@@ -305,31 +306,37 @@ function tvApp() {
     async loadLikes() {
       try {
         const res = await fetch("/api/likes", { credentials: "include" });
-        if (!res.ok) { this.likedIds = new Set(); return; }
+        if (!res.ok) { this.likedIds = new Set(); this.dislikedIds = new Set(); return; }
         const data = await res.json();
-        this.likedIds = new Set(data.filter(l => l.epg_event_id).map(l => l.epg_event_id));
-      } catch (_) { this.likedIds = new Set(); }
+        this.likedIds    = new Set(data.filter(l => l.epg_event_id && l.sentiment !== "dislike").map(l => l.epg_event_id));
+        this.dislikedIds = new Set(data.filter(l => l.epg_event_id && l.sentiment === "dislike").map(l => l.epg_event_id));
+      } catch (_) { this.likedIds = new Set(); this.dislikedIds = new Set(); }
     },
 
-    async toggleLike(eventId) {
+    async _toggleReaction(eventId, sentiment) {
       if (!eventId) return;
       try {
         const res = await fetch("/api/likes/toggle", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           credentials: "include",
-          body: JSON.stringify({ epg_event_id: eventId }),
+          body: JSON.stringify({ epg_event_id: eventId, sentiment }),
         });
         if (!res.ok) return;
         const data = await res.json();
-        // Reassign to trigger Alpine reactivity
-        const next = new Set(this.likedIds);
-        if (data.liked) next.add(eventId); else next.delete(eventId);
-        this.likedIds = next;
-        // Invalidate cached recs so the next view uses the new signal
+        const nextLiked = new Set(this.likedIds);
+        const nextDisliked = new Set(this.dislikedIds);
+        if (data.liked) { nextLiked.add(eventId); nextDisliked.delete(eventId); }
+        else if (data.disliked) { nextDisliked.add(eventId); nextLiked.delete(eventId); }
+        else { nextLiked.delete(eventId); nextDisliked.delete(eventId); }
+        this.likedIds = nextLiked;
+        this.dislikedIds = nextDisliked;
         this.recsData = null;
       } catch (_) {}
     },
+
+    toggleLike(eventId)    { return this._toggleReaction(eventId, "like"); },
+    toggleDislike(eventId) { return this._toggleReaction(eventId, "dislike"); },
 
     // ── Admin ────────────────────────────────────────────────────────────────
 

@@ -98,18 +98,25 @@ def rule_based_rank(candidates: list[EpgEvent], context: str, db: Session) -> li
     ]
 
 
-def _get_recent_likes(user_id: int, db: Session, limit: int = 15) -> list[dict]:
+def _get_recent_reactions(user_id: int, db: Session, limit: int = 15) -> tuple[list[dict], list[dict]]:
+    """Return (likes, dislikes) as separate lists, most recent first."""
     rows = (
         db.query(UserLike)
         .filter(UserLike.user_id == user_id)
         .order_by(UserLike.created_at.desc())
-        .limit(limit)
+        .limit(limit * 2)
         .all()
     )
-    return [
-        {"title": r.title, "channel": r.channel_name or "?", "genre": r.genre}
-        for r in rows
-    ]
+    likes, dislikes = [], []
+    for r in rows:
+        entry = {"title": r.title, "channel": r.channel_name or "?", "genre": r.genre}
+        if r.sentiment == "dislike":
+            if len(dislikes) < limit:
+                dislikes.append(entry)
+        else:
+            if len(likes) < limit:
+                likes.append(entry)
+    return likes, dislikes
 
 
 def _get_recent_history(user_id: int, db: Session) -> list[dict]:
@@ -140,7 +147,7 @@ def _get_recent_history(user_id: int, db: Session) -> list[dict]:
 
 def _build_prompt(
     user_name: str, context: str, profile: dict,
-    history: list[dict], likes: list[dict], candidates: list[EpgEvent], db: Session,
+    history: list[dict], likes: list[dict], dislikes: list[dict], candidates: list[EpgEvent], db: Session,
 ) -> str:
     ctx_labels = {
         "now": "gerade jetzt läuft",
@@ -169,6 +176,12 @@ def _build_prompt(
         for l in likes
     ]
     likes_str = "\n".join(likes_lines) if likes_lines else "  (keine)"
+
+    dislikes_lines = [
+        f"  - {d.get('title','?')} | {d.get('channel','?')} | {d.get('genre') or 'unbekannt'}"
+        for d in dislikes
+    ]
+    dislikes_str = "\n".join(dislikes_lines) if dislikes_lines else "  (keine)"
 
     cand_lines = []
     for i, ev in enumerate(candidates):
@@ -200,6 +213,9 @@ NUTZERPROFIL ({profile.get('session_count', 0)} Sitzungen, letzte 30 Tage):
 POSITIV BEWERTET (👍 vom Nutzer, starkes positives Signal):
 {likes_str}
 
+NEGATIV BEWERTET (👎 vom Nutzer, diese und ähnliche Sendungen NICHT empfehlen):
+{dislikes_str}
+
 LETZTE SEHHISTORIE:
 {hist_str}
 
@@ -214,10 +230,10 @@ Regeln: 5–8 Nummern aus der Liste, nach Passgenauigkeit absteigend."""
 
 async def _try_ollama(
     user_name: str, context: str, profile: dict,
-    history: list[dict], likes: list[dict], candidates: list[EpgEvent], db: Session,
+    history: list[dict], likes: list[dict], dislikes: list[dict], candidates: list[EpgEvent], db: Session,
 ) -> dict | None:
     """Ask LLM to rank candidate indices, then fill in metadata server-side."""
-    prompt = _build_prompt(user_name, context, profile, history, likes, candidates, db)
+    prompt = _build_prompt(user_name, context, profile, history, likes, dislikes, candidates, db)
     raw = await ask_json(prompt)
     if not raw or not isinstance(raw, dict) or "ranking" not in raw:
         log.warning("recommendations.bad_llm_response", raw_type=type(raw).__name__, keys=list(raw.keys()) if isinstance(raw, dict) else None)
@@ -303,19 +319,19 @@ async def get_recommendations(user_id: int, user_name: str, context: str, db: Se
     candidates = _epg_candidates(context, channel_ids, db)
 
     profile = get_profile(user_id, db)
-    # Skip cold-start gate when stated preferences or any likes are set — AI has enough context.
-    like_count = db.query(UserLike).filter_by(user_id=user_id).count()
+    # Skip cold-start gate when stated preferences or any reactions are set — AI has enough context.
+    reaction_count = db.query(UserLike).filter_by(user_id=user_id).count()
     cold_start = (
         profile.get("session_count", 0) < 10
         and not profile.get("stated_preferences")
-        and like_count == 0
+        and reaction_count == 0
     )
 
     ai_result = None
     if not cold_start and candidates:
         history = _get_recent_history(user_id, db)
-        likes = _get_recent_likes(user_id, db)
-        ai_result = await _try_ollama(user_name, context, profile, history, likes, candidates, db)
+        likes, dislikes = _get_recent_reactions(user_id, db)
+        ai_result = await _try_ollama(user_name, context, profile, history, likes, dislikes, candidates, db)
 
     if ai_result is not None:
         result = {

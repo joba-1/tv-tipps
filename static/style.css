@@ -435,11 +435,17 @@ nav details ul a {
   border: none;
   background: none;
 }
-.like-btn { margin: 0; font-size: 0.9rem; }
+.modal-footer { gap: 0.5rem; }
+.like-btn, .dislike-btn { margin: 0; font-size: 0.9rem; }
 .like-btn.liked {
   background: var(--pico-primary);
   border-color: var(--pico-primary);
   color: var(--pico-primary-inverse);
+}
+.dislike-btn.disliked {
+  background: var(--pico-del-color, #c0392b);
+  border-color: var(--pico-del-color, #c0392b);
+  color: #fff;
 }
 
 /* ---- Modal ---- */

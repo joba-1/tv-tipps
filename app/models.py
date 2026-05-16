@@ -189,6 +189,7 @@ class UserLike(Base):
     title: Mapped[str] = mapped_column(Text, nullable=False)
     channel_name: Mapped[str | None] = mapped_column(String(256))
     genre: Mapped[str | None] = mapped_column(String(64))
+    sentiment: Mapped[str] = mapped_column(String(8), nullable=False, default="like", server_default="like")
     created_at: Mapped[datetime] = mapped_column(nullable=False)
 
 
