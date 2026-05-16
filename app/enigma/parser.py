@@ -5,17 +5,24 @@ from datetime import datetime, timezone
 from html import unescape
 
 
-def _clean(s: str | None) -> str | None:
-    """Unescape HTML entities and normalise DVB control chars.
+_DVB_C1 = str.maketrans({
+    # EN 300 468 Annex A control characters
+    "\x80": "€",   # cp1252 0x80 = € (euro sign); OpenWebif misreads it as U+0080
+    "\x86": "",    # Emphasis On  — no plain-text equivalent, drop
+    "\x87": "",    # Emphasis Off — no plain-text equivalent, drop
+    "\x8a": "\n",  # CR/LF line separator
+    "\x1a": "\n",  # field separator used by some German broadcasters
+})
 
-    U+008A is the DVB EPG line-separator (ISO 6937 byte 0x8A); replace with \n.
-    Other C1 control chars (U+0080–U+009F) are artefacts; strip them.
-    """
+
+def _clean(s: str | None) -> str | None:
+    """Unescape HTML entities and normalise DVB/ISO 6937 control characters."""
     if not s:
         return None
     s = unescape(s)
-    s = s.replace("\x8a", "\n")  # DVB line separator → newline
-    s = "".join(ch for ch in s if not ("\x80" <= ch <= "\x9f"))  # strip remaining C1
+    s = s.translate(_DVB_C1)
+    # strip any remaining C0/C1 control chars not listed above
+    s = "".join(ch for ch in s if ord(ch) >= 32 or ch in "\n\t")
     return s or None
 
 
