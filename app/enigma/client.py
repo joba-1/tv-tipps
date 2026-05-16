@@ -24,6 +24,10 @@ RC_KEYS: dict[str, int] = {
     "back":   174,
     "menu":   139,
     "info":   358,
+    "red":    398,
+    "green":  399,
+    "yellow": 400,
+    "blue":   401,
 }
 
 

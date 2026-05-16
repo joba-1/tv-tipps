@@ -398,12 +398,20 @@
         <button class="outline remote-btn" @click="sendKey('back')" :disabled="remoteSending">↩ Back</button>
       </div>
 
+      <!-- Color buttons -->
+      <div class="remote-color-row">
+        <button class="remote-btn remote-red"    @click="sendKey('red')"    :disabled="remoteSending">■</button>
+        <button class="remote-btn remote-green"  @click="sendKey('green')"  :disabled="remoteSending">■</button>
+        <button class="remote-btn remote-yellow" @click="sendKey('yellow')" :disabled="remoteSending">■</button>
+        <button class="remote-btn remote-blue"   @click="sendKey('blue')"   :disabled="remoteSending">■</button>
+      </div>
+
       <!-- Screenshot feedback -->
       <div class="remote-screenshot-wrap">
         <div class="remote-screenshot-header">
           <small x-text="remoteScreenshotUrl ? '📺 Live' : (remoteScreenshotLoading ? '📺 …' : '📺 –')"></small>
-          <button class="outline remote-btn remote-shot-refresh" @click="refreshScreenshot()"
-                  :aria-busy="remoteScreenshotLoading">↺</button>
+          <button :class="'remote-btn remote-shot-refresh' + (screenshotPollActive ? ' active' : ' outline')"
+                  @click="toggleScreenshotPoll()" :aria-busy="remoteScreenshotLoading">↺</button>
         </div>
         <img class="remote-screenshot" :src="remoteScreenshotUrl" alt=""
              style="display:block;width:100%" x-show="remoteScreenshotUrl" />

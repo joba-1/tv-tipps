@@ -519,6 +519,16 @@ button.close { background: none; border: none; font-size: 1.2rem; padding: 0; cu
 }
 .remote-nav-row .remote-btn { flex: 1; }
 
+.remote-color-row {
+  display: flex;
+  gap: 0.5rem;
+}
+.remote-color-row .remote-btn { flex: 1; font-size: 1.4rem; padding: 0.3rem 0 !important; border: none; }
+.remote-red    { background: #c0392b; color: #fff; }
+.remote-green  { background: #27ae60; color: #fff; }
+.remote-yellow { background: #f39c12; color: #fff; }
+.remote-blue   { background: #2980b9; color: #fff; }
+
 .remote-btn {
   padding: 0.55rem 0.4rem !important;
   font-size: 0.88rem;
@@ -547,6 +557,11 @@ button.close { background: none; border: none; font-size: 1.2rem; padding: 0; cu
   font-size: 0.8rem;
   margin: 0;
   line-height: 1.4 !important;
+}
+.remote-shot-refresh.active {
+  background: var(--pico-primary);
+  border-color: var(--pico-primary);
+  color: var(--pico-primary-inverse);
 }
 .remote-screenshot {
   width: 100%;

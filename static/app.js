@@ -60,6 +60,7 @@ function tvApp() {
     _remoteMsgTimer: null,
     remoteScreenshotUrl: "",
     _remoteScreenshotTimer: null,
+    screenshotPollActive: false,
     remoteSending: false,
     remoteScreenshotLoading: false,
 
@@ -575,6 +576,7 @@ function tvApp() {
     },
 
     _startScreenshotPoll() {
+      this.screenshotPollActive = true;
       this.refreshScreenshot();
       if (!this._remoteScreenshotTimer) {
         this._remoteScreenshotTimer = setInterval(() => this.refreshScreenshot(), 5000);
@@ -582,11 +584,17 @@ function tvApp() {
     },
 
     _stopScreenshotPoll() {
+      this.screenshotPollActive = false;
       if (this._remoteScreenshotTimer) {
         clearInterval(this._remoteScreenshotTimer);
         this._remoteScreenshotTimer = null;
       }
       this.remoteScreenshotUrl = "";
+    },
+
+    toggleScreenshotPoll() {
+      if (this.screenshotPollActive) this._stopScreenshotPoll();
+      else this._startScreenshotPoll();
     },
 
     _remoteToast(msg) {
