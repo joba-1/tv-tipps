@@ -197,7 +197,7 @@ nav details ul a {
   border-radius: 10px;
   white-space: nowrap;
   background: rgba(255, 255, 255, 0.08);
-  align-self: flex-start;
+  align-self: center;
 }
 .event-match.high { color: #52b788; background: rgba(82, 183, 136, 0.18); }
 .event-match.mid  { color: #f4a261; background: rgba(244, 162, 97, 0.16); }
