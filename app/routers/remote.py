@@ -166,6 +166,31 @@ async def add_record_timer(req: TimerRequest):
     )
     ok = bool(resp and resp.get("result"))
     msg = (resp or {}).get("message", "") or ""
+
+    # OWIF on several builds returns result=false even when the timer was
+    # accepted (or one was already present for this event). Re-check the
+    # timerlist before reporting failure — that's the consistent ground truth.
+    if not ok:
+        try:
+            timers = await client.list_timers()
+        except Exception:
+            timers = []
+        for t in timers:
+            if t.get("disabled"):
+                continue
+            same_eit = req.event_id is not None and t.get("eit") == req.event_id
+            try:
+                same_slot = (
+                    t.get("serviceref") == req.sref
+                    and abs(int(t.get("begin", 0)) - begin_ts) <= 300
+                )
+            except (TypeError, ValueError):
+                same_slot = False
+            if same_eit or same_slot:
+                ok = True
+                msg = msg or "timer already present"
+                break
+
     log.info("remote.record",
              receiver=rcfg.name, sref=req.sref, title=req.title,
              eit=req.event_id, ok=ok, owif_message=msg)
