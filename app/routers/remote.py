@@ -22,7 +22,12 @@ class KeyRequest(BaseModel):
 
 
 async def _find_receiver(preferred_name: str | None):
-    """Return (rcfg, client) for the best available online receiver."""
+    """Return (rcfg, client) for the requested receiver.
+
+    If a name is given, return that receiver regardless of online state
+    (caller decides how to handle offline). If no name given, return the
+    first online receiver by priority order.
+    """
     from app.enigma.client import EnigmaClient
     from app.database import SessionLocal
     from app.services.receivers import get_receiver_configs, get_receiver_config
@@ -31,9 +36,8 @@ async def _find_receiver(preferred_name: str | None):
         if preferred_name:
             rcfg = get_receiver_config(preferred_name, db)
             if rcfg:
-                client = EnigmaClient(rcfg.ip, mock=settings.mock_receivers)
-                if await client.is_online():
-                    return rcfg, client
+                return rcfg, EnigmaClient(rcfg.ip, mock=settings.mock_receivers)
+            return None, None
         for rcfg in get_receiver_configs(db):
             client = EnigmaClient(rcfg.ip, mock=settings.mock_receivers)
             if await client.is_online():
@@ -51,30 +55,21 @@ async def zap_to_channel(req: ZapRequest):
     rcfg, client = await _find_receiver(req.receiver)
     woke = False
 
-    # No box reachable → wake first in priority order, poll until online
-    if rcfg is None:
-        from app.database import SessionLocal
-        from app.services.receivers import get_receiver_configs
-        _db = SessionLocal()
-        try:
-            _all = get_receiver_configs(_db)
-        finally:
-            _db.close()
-        for r in _all:
-            if not await wake_receiver(r):
-                continue
-            log.info("remote.waking_receiver", receiver=r.name)
-            c = EnigmaClient(r.ip, mock=settings.mock_receivers)
-            for _ in range(6):
-                await asyncio.sleep(5)
-                if await c.is_online():
-                    rcfg, client, woke = r, c, True
-                    break
-            if rcfg:
-                break
-
     if rcfg is None or client is None:
         raise HTTPException(503, "No receiver available")
+
+    # Wake from deep standby (unreachable) → send WOL/intertechno, poll until online
+    if not await client.is_online():
+        if not await wake_receiver(rcfg):
+            raise HTTPException(503, f"Could not wake {rcfg.name}")
+        log.info("remote.waking_receiver", receiver=rcfg.name)
+        for _ in range(6):
+            await asyncio.sleep(5)
+            if await client.is_online():
+                woke = True
+                break
+        if not woke:
+            raise HTTPException(503, f"{rcfg.name} did not come online after wake")
 
     # Wake from light standby before zapping
     if not woke and await client.get_power_state() == "standby":
