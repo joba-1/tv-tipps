@@ -136,6 +136,9 @@ function tvApp() {
 
       const cookieUser = this._getCookie("tv_tips_user");
       this.currentUser = this.users.find(u => u.slug === cookieUser) || this.users[0] || null;
+      if (this.currentUser && !cookieUser) {
+        document.cookie = `tv_tips_user=${this.currentUser.slug}; path=/; max-age=31536000; SameSite=Lax`;
+      }
 
       const cookieReceiver = this._getCookie("tv_tips_receiver");
       this.selectedReceiver = this.receivers.find(r => r.name === cookieReceiver) || null;
