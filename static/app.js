@@ -588,6 +588,7 @@ function tvApp() {
 
     refreshScreenshot() {
       if (this.remoteScreenshotLoading) return;
+      if (this.selectedReceiver && (!this.selectedReceiver.online || this.selectedReceiver.power_state === "off")) return;
       const recv = this.selectedReceiver ? encodeURIComponent(this.selectedReceiver.name) : "";
       const url = `/api/remote/screenshot?${recv ? "receiver=" + recv + "&" : ""}t=${Date.now()}`;
       this.remoteScreenshotLoading = true;
