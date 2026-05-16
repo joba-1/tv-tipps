@@ -1,7 +1,7 @@
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, HTMLResponse
 from pathlib import Path
 from app.logging_setup import setup_logging, get_logger
 from app.database import init_db, SessionLocal
@@ -72,10 +72,15 @@ static_dir = Path("static")
 static_dir.mkdir(exist_ok=True)
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
+_version = (Path("VERSION").read_text().strip() if Path("VERSION").exists() else "0")
+
 
 @app.get("/{full_path:path}", include_in_schema=False)
 async def serve_spa(full_path: str):
     index = static_dir / "index.html"
-    if index.exists():
-        return FileResponse(index)
-    return {"detail": "Frontend not built yet"}
+    if not index.exists():
+        return {"detail": "Frontend not built yet"}
+    html = index.read_text()
+    html = html.replace('href="/static/style.css"', f'href="/static/style.css?v={_version}"')
+    html = html.replace('src="/static/app.js"', f'src="/static/app.js?v={_version}"')
+    return HTMLResponse(html, headers={"Cache-Control": "no-cache"})
