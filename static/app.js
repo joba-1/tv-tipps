@@ -128,6 +128,7 @@ function tvApp() {
         const hash = window.location.hash.replace(/^#\/?/, "");
         this.page = hash || "recs";
         if (prevPage === "remote" && this.page !== "remote") this._stopScreenshotPoll();
+        if (prevPage === "recs"   && this.page !== "recs")   this._cancelFastRecsPoll();
         if (this.page === "epg")    this.loadEpg();
         if (this.page === "now")    this.loadNowNext();
         if (this.page === "recs")   this.loadRecs();
@@ -214,6 +215,12 @@ function tvApp() {
         );
         if (!res.ok) throw new Error(res.statusText);
         this.recsData = await res.json();
+        // Server says it's still warming an LLM ranking → poll faster until it lands.
+        if (this.recsData?.regenerating && this.page === "recs") {
+          this._scheduleFastRecsPoll();
+        } else {
+          this._cancelFastRecsPoll();
+        }
       } catch (e) {
         console.error("loadRecs failed:", e);
       } finally {
@@ -221,9 +228,25 @@ function tvApp() {
       }
     },
 
+    _scheduleFastRecsPoll() {
+      if (this._fastRecsTimer) return; // already queued
+      this._fastRecsTimer = setTimeout(() => {
+        this._fastRecsTimer = null;
+        if (this.page === "recs") this.loadRecs();
+      }, 15_000);
+    },
+
+    _cancelFastRecsPoll() {
+      if (this._fastRecsTimer) {
+        clearTimeout(this._fastRecsTimer);
+        this._fastRecsTimer = null;
+      }
+    },
+
     setRecsContext(ctx) {
       this.recsContext = ctx;
       this.recsData = null;
+      this._cancelFastRecsPoll();
       this.loadRecs();
     },
 

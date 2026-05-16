@@ -715,6 +715,8 @@ async def get_recommendations(
         ),
         "recommendations": recs,
         "cached": False, "cold_start": cold_start,
+        # Tells the frontend to poll faster until an LLM result lands.
+        "regenerating": not cold_start,
     }
     # Short TTL so the background LLM result replaces this quickly.
     _save_cache(user_id, context, result, 5, db)
