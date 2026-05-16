@@ -1,5 +1,5 @@
 {
-  "nav.tips": "★ Tips",
+  "nav.tips": "★ Tipps",
   "nav.now_next": "⏯ Now & Next",
   "nav.epg": "📅 EPG",
   "nav.admin": "⚙ Admin",
@@ -19,9 +19,9 @@
   "btn.refresh_epg": "↺ EPG voll",
   "btn.close": "Schließen",
 
-  "msg.loading_tips": "Tips werden geladen…",
+  "msg.loading_tips": "Tipps werden geladen…",
   "msg.loading_epg": "Lade EPG…",
-  "msg.cold_start": "Noch zu wenig Daten — zeige populäre Sendungen. Weiter schauen, damit Tips persönlicher werden!",
+  "msg.cold_start": "Noch zu wenig Daten — zeige populäre Sendungen. Weiter schauen, damit Tipps persönlicher werden!",
   "msg.no_recs": "Keine Empfehlungen gefunden. Receiver online? EPG aktuell?",
   "msg.no_channels": "Keine Sender gefunden. Receiver online? Daten aktualisieren.",
   "msg.no_programmes": "Keine Sendungen gefunden.",
@@ -83,7 +83,7 @@
   "msg.epg_search_no_results": "Keine Treffer für „{q}“.",
   "label.power_method": "{method}",
 
-  "page.tips.title": "★ Tips",
+  "page.tips.title": "★ Tipps",
   "page.now.title": "Now & Next",
   "page.epg.title": "EPG",
   "page.admin.title": "Admin",

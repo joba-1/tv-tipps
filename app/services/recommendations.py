@@ -599,34 +599,74 @@ def _save_cache(user_id: int, context: str, result: dict, ttl_min: int, db: Sess
     db.commit()
 
 
+# Per-(user, context) regen lock — prevents stampedes when many requests hit
+# a stale cache at the same time.
+_regen_pending: set[tuple[int, str]] = set()
+
+
+async def _regen_in_background(user_id: int, user_name: str, context: str) -> None:
+    """Refresh one user×context cache without blocking any user request."""
+    import asyncio  # noqa: F401  (kept local to avoid top-level import)
+    key = (user_id, context)
+    if key in _regen_pending:
+        return
+    _regen_pending.add(key)
+    try:
+        from app.database import SessionLocal as _SL
+        db = _SL()
+        try:
+            await get_recommendations(user_id, user_name, context, db, force_refresh=True)
+            log.info("recs.bg_regen_done", user_id=user_id, context=context)
+        finally:
+            db.close()
+    except Exception as e:
+        log.warning("recs.bg_regen_failed",
+                    user_id=user_id, context=context, error=str(e))
+    finally:
+        _regen_pending.discard(key)
+
+
 async def get_recommendations(
     user_id: int, user_name: str, context: str, db: Session,
     force_refresh: bool = False,
 ) -> dict:
+    """User-facing requests never wait on the LLM:
+      - fresh cache       → serve immediately
+      - stale cache       → serve stale, trigger LLM regen in background
+      - no cache          → return rule-based snapshot, trigger LLM in background
+    Only the background path (force_refresh=True, also called by the warmer) does
+    the slow LLM call."""
+    import asyncio
     now = utcnow()
     key = _cache_key(user_id, context)
 
     if not force_refresh:
+        # Latest cache entry regardless of freshness.
         cached = (
             db.query(RecommendationCache)
             .filter(
                 RecommendationCache.user_id == user_id,
                 RecommendationCache.prompt_hash == key,
-                RecommendationCache.valid_until > now,
             )
             .order_by(RecommendationCache.generated_at.desc())
             .first()
         )
         if cached:
+            is_fresh = cached.valid_until > now
             data = json.loads(cached.response)
             data["cached"] = True
+            if not is_fresh:
+                age_min = (now - cached.generated_at).total_seconds() / 60
+                log.info("recs.serving_stale",
+                         user_id=user_id, context=context, age_min=round(age_min, 1))
+                asyncio.create_task(_regen_in_background(user_id, user_name, context))
             return _realtime_adjust_now(data)
 
+    # No cache for this user×context yet — build the rule-based slate first so
+    # the user has something to look at immediately; queue the LLM in background.
     channel_ids = [c.id for c in get_channels_for_user(user_id, db)]
     candidates = _epg_candidates(context, channel_ids, db)
-
     profile = get_profile(user_id, db)
-    # Skip cold-start gate when stated preferences or any reactions are set — AI has enough context.
     reaction_count = db.query(UserLike).filter_by(user_id=user_id).count()
     cold_start = (
         profile.get("session_count", 0) < 10
@@ -634,35 +674,49 @@ async def get_recommendations(
         and reaction_count == 0
     )
 
-    ai_result = None
-    if not cold_start and candidates:
-        history = _get_recent_history(user_id, db)
-        likes, dislikes = _get_recent_reactions(user_id, db)
-        ai_result = await _try_ollama(user_name, context, profile, history, likes, dislikes, candidates, db)
+    if force_refresh:
+        # Background warming — actually run the LLM.
+        ai_result = None
+        if not cold_start and candidates:
+            history = _get_recent_history(user_id, db)
+            likes, dislikes = _get_recent_reactions(user_id, db)
+            ai_result = await _try_ollama(
+                user_name, context, profile, history, likes, dislikes, candidates, db
+            )
+        if ai_result is not None:
+            result = {
+                "context": context, "user_name": user_name,
+                "taste_summary": ai_result.get("taste_summary", ""),
+                "recommendations": ai_result.get("recommendations", []),
+                "cached": False, "cold_start": False,
+            }
+        else:
+            recs = rule_based_rank(candidates, context, db)
+            result = {
+                "context": context, "user_name": user_name,
+                "taste_summary": (
+                    "Noch zu wenig Daten — zeige populäre Sendungen" if cold_start
+                    else "KI nicht verfügbar — Empfehlungen nach Regeln"
+                ),
+                "recommendations": recs,
+                "cached": False, "cold_start": cold_start,
+            }
+        _save_cache(user_id, context, result, _CACHE_TTL.get(context, 30), db)
+        return _realtime_adjust_now(result)
 
-    if ai_result is not None:
-        result = {
-            "context": context,
-            "user_name": user_name,
-            "taste_summary": ai_result.get("taste_summary", ""),
-            "recommendations": ai_result.get("recommendations", []),
-            "cached": False,
-            "cold_start": False,
-        }
-    else:
-        recs = rule_based_rank(candidates, context, db)
-        result = {
-            "context": context,
-            "user_name": user_name,
-            "taste_summary": (
-                "Noch zu wenig Daten — zeige populäre Sendungen"
-                if cold_start
-                else "KI nicht verfügbar — Empfehlungen nach Regeln"
-            ),
-            "recommendations": recs,
-            "cached": False,
-            "cold_start": cold_start,
-        }
-
-    _save_cache(user_id, context, result, _CACHE_TTL.get(context, 30), db)
+    # User-facing path, truly cold cache: respond fast with rule-based, cache it
+    # briefly, and queue the LLM regen.
+    recs = rule_based_rank(candidates, context, db)
+    result = {
+        "context": context, "user_name": user_name,
+        "taste_summary": (
+            "Noch zu wenig Daten — zeige populäre Sendungen" if cold_start
+            else "Erste Empfehlungen — KI-Auswahl wird im Hintergrund vorbereitet…"
+        ),
+        "recommendations": recs,
+        "cached": False, "cold_start": cold_start,
+    }
+    # Short TTL so the background LLM result replaces this quickly.
+    _save_cache(user_id, context, result, 5, db)
+    asyncio.create_task(_regen_in_background(user_id, user_name, context))
     return _realtime_adjust_now(result)
