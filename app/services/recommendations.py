@@ -308,35 +308,29 @@ Wenn ein Kandidat den Hinweis "bereits X% gelaufen" trägt, dann gilt: je höher
 Antworte JETZT NUR mit dem JSON-Objekt, beginnend mit {{ und endend mit }}."""
 
 
-_RANKING_KEYS = ("ranking", "recommendations", "ranked", "ranking_indices", "indices", "tipps", "tips")
+_RANKING_KEYS = (
+    "ranking", "recommendations", "ranked", "ranking_indices", "indices",
+    "selected_shows", "selected", "selection", "shows", "programmes", "programs",
+    "tipps", "tips", "picks",
+)
 _INDEX_KEYS = ("nr", "index", "rank", "candidate", "id", "number", "nummer", "no")
 _REASON_KEYS = ("reason", "begründung", "begruendung", "explanation", "warum")
 _SUMMARY_KEYS = ("taste_summary", "summary", "zusammenfassung", "geschmack")
 
 
-def _parse_llm_ranking(raw: dict) -> tuple[list[int], dict[str, str], str]:
-    """Extract (indices, reasons_by_idx, taste_summary) from a model dict.
-    Tolerates several plausible shapes since small models drift from the
-    requested schema. Returns ([], {}, "") if nothing usable can be salvaged."""
-    # Find the ranked list
-    ranked = None
-    for k in _RANKING_KEYS:
-        v = raw.get(k)
-        if isinstance(v, list):
-            ranked = v
-            break
-    if ranked is None:
-        return [], {}, ""
-
+def _indices_from_list(ranked: list) -> tuple[list[int], dict[str, str]]:
     indices: list[int] = []
     embedded: dict[str, str] = {}
     for item in ranked:
         idx = None
+        if isinstance(item, bool):
+            continue
         if isinstance(item, int):
             idx = item
         elif isinstance(item, str):
+            s = item.strip().strip("[]*. ")
             try:
-                idx = int(item.strip())
+                idx = int(s)
             except ValueError:
                 pass
         elif isinstance(item, dict):
@@ -347,18 +341,44 @@ def _parse_llm_ranking(raw: dict) -> tuple[list[int], dict[str, str], str]:
                         break
                     except (TypeError, ValueError):
                         pass
-            for rk in _REASON_KEYS:
-                if idx is not None and item.get(rk):
-                    embedded[str(idx)] = str(item[rk])
-                    break
+            if idx is not None:
+                for rk in _REASON_KEYS:
+                    if item.get(rk):
+                        embedded[str(idx)] = str(item[rk])
+                        break
         if idx is not None:
             indices.append(idx)
+    return indices, embedded
+
+
+def _parse_llm_ranking(raw: dict) -> tuple[list[int], dict[str, str], str]:
+    """Extract (indices, reasons_by_idx, taste_summary) from a model dict.
+    Tolerates several plausible shapes since small models drift from the
+    requested schema. Returns ([], {}, "") if nothing usable can be salvaged."""
+    # 1. Try known ranking keys, pick the best yield
+    best_indices: list[int] = []
+    best_embedded: dict[str, str] = {}
+    for k in _RANKING_KEYS:
+        v = raw.get(k)
+        if isinstance(v, list) and v:
+            ix, em = _indices_from_list(v)
+            if len(ix) > len(best_indices):
+                best_indices, best_embedded = ix, em
+
+    # 2. Fallback: any list-valued key we haven't tried, pick best yield
+    if not best_indices:
+        for k, v in raw.items():
+            if k in _RANKING_KEYS or not isinstance(v, list) or not v:
+                continue
+            ix, em = _indices_from_list(v)
+            if len(ix) > len(best_indices):
+                best_indices, best_embedded = ix, em
 
     # Explicit reasons block takes priority over embedded ones
-    reasons = embedded
+    reasons = best_embedded
     explicit = raw.get("reasons")
     if isinstance(explicit, dict):
-        reasons = {**embedded, **{str(k): str(v) for k, v in explicit.items()}}
+        reasons = {**best_embedded, **{str(k): str(v) for k, v in explicit.items()}}
 
     summary = ""
     for sk in _SUMMARY_KEYS:
@@ -367,7 +387,7 @@ def _parse_llm_ranking(raw: dict) -> tuple[list[int], dict[str, str], str]:
             summary = v.strip()
             break
 
-    return indices, reasons, summary
+    return best_indices, reasons, summary
 
 
 def _extract_indices_from_text(text: str, max_count: int = 8) -> list[int]:
