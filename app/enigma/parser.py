@@ -6,10 +6,17 @@ from html import unescape
 
 
 def _clean(s: str | None) -> str | None:
-    """Unescape HTML entities that OpenWebif sometimes returns."""
+    """Unescape HTML entities and normalise DVB control chars.
+
+    U+008A is the DVB EPG line-separator (ISO 6937 byte 0x8A); replace with \n.
+    Other C1 control chars (U+0080–U+009F) are artefacts; strip them.
+    """
     if not s:
         return None
-    return unescape(s)
+    s = unescape(s)
+    s = s.replace("\x8a", "\n")  # DVB line separator → newline
+    s = "".join(ch for ch in s if not ("\x80" <= ch <= "\x9f"))  # strip remaining C1
+    return s or None
 
 
 @dataclass
