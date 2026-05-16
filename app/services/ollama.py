@@ -7,8 +7,10 @@ from config import settings
 
 log = get_logger(__name__)
 
-_TIMEOUT = httpx.Timeout(180.0)
-_OPTIONS = {"num_ctx": 8192, "temperature": 0.1}
+_TIMEOUT = httpx.Timeout(240.0)
+# temperature=0 → fully deterministic, max coherence with schema instructions.
+# num_ctx=16384 → fits the largest prompts ("today" with 100 candidates + history).
+_OPTIONS = {"num_ctx": 16384, "temperature": 0.0}
 
 
 async def ask_json(prompt: str) -> dict | str | None:
@@ -22,6 +24,9 @@ async def ask_json(prompt: str) -> dict | str | None:
         "model": settings.ollama_model,
         "prompt": prompt,
         "stream": False,
+        # Grammar-constrain the model to valid JSON regardless of how chatty it is.
+        # The prompt still dictates which keys/shape to produce.
+        "format": "json",
         "options": _OPTIONS,
     }
     last_raw = ""
