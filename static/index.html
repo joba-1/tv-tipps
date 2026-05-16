@@ -192,11 +192,11 @@
     <div class="page-header">
       <h2 x-text="t('page.epg.title')"></h2>
       <details class="dropdown context-dropdown">
-        <summary x-text="{'2h': t('label.epg_2h'), '4h': t('label.epg_4h'), 'tonight': t('label.epg_tonight')}[epgContext]"></summary>
+        <summary x-text="{'4h': t('label.epg_4h'), 'tonight': t('label.epg_tonight'), 'all': t('label.epg_all')}[epgContext]"></summary>
         <ul>
-          <li><a href="#" @click.prevent="setEpgContext('2h');      $el.closest('details').removeAttribute('open')" x-text="t('label.epg_2h')"      :style="epgContext==='2h'      ? 'font-weight:bold' : ''"></a></li>
           <li><a href="#" @click.prevent="setEpgContext('4h');      $el.closest('details').removeAttribute('open')" x-text="t('label.epg_4h')"      :style="epgContext==='4h'      ? 'font-weight:bold' : ''"></a></li>
           <li><a href="#" @click.prevent="setEpgContext('tonight'); $el.closest('details').removeAttribute('open')" x-text="t('label.epg_tonight')" :style="epgContext==='tonight' ? 'font-weight:bold' : ''"></a></li>
+          <li><a href="#" @click.prevent="setEpgContext('all');     $el.closest('details').removeAttribute('open')" x-text="t('label.epg_all')"     :style="epgContext==='all'     ? 'font-weight:bold' : ''"></a></li>
         </ul>
       </details>
       <button class="outline secondary refresh-btn" @click="loadEpg()" :aria-busy="loadingEpg"

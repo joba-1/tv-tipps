@@ -39,7 +39,7 @@ function tvApp() {
     // EPG range
     epgEvents: [],
     loadingEpg: false,
-    epgContext: "2h",
+    epgContext: "4h",
     epgSearchQuery: "",
     _epgSearchTimer: null,
 
@@ -340,8 +340,8 @@ function tvApp() {
       try {
         let url = "/api/epg?";
         if (this.epgContext === "tonight") url += "context=tonight";
-        else if (this.epgContext === "2h")  url += "hours=2";
         else if (this.epgContext === "4h")  url += "hours=4";
+        else if (this.epgContext === "all") url += "hours=72";
         const res = await fetch(url, { credentials: "include" });
         if (!res.ok) throw new Error(res.statusText);
         this.epgEvents = await res.json();
