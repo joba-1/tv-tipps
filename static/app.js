@@ -68,6 +68,7 @@ function tvApp() {
     modalOpen: false,
     modalEvent: null,
     modalChannel: "",
+    modalSref: "",
 
     // ── i18n helpers ────────────────────────────────────────────────────────
 
@@ -627,9 +628,10 @@ function tvApp() {
 
     // ── Helpers ──────────────────────────────────────────────────────────────
 
-    showDetail(event, channelName) {
+    showDetail(event, channelName, sref = null) {
       this.modalEvent = event;
       this.modalChannel = channelName;
+      this.modalSref = sref || event?.sref || "";
       this.modalOpen = true;
     },
 

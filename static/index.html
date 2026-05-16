@@ -123,10 +123,6 @@
                   x-text="t('label.match', { pct: Math.round(rec.match_score*100) })"></span>
           </div>
           <div class="rec-reason" x-text="rec.reason"></div>
-          <footer>
-            <button @click.stop="watchChannel(rec.sref)" class="watch-btn"
-                    x-text="t('btn.watch')"></button>
-          </footer>
         </article>
       </template>
       <div x-show="(!recsData || !recsData.recommendations || recsData.recommendations.length===0)
@@ -159,7 +155,7 @@
             <strong x-text="ch.channel_name"></strong>
           </header>
 
-          <div x-show="ch.now" @click="showDetail(ch.now, ch.channel_name)"
+          <div x-show="ch.now" @click="showDetail(ch.now, ch.channel_name, ch.sref)"
                class="program now-program" role="button">
             <div class="program-title" x-text="ch.now?.title"></div>
             <div class="progress-bar">
@@ -171,7 +167,7 @@
           <div x-show="!ch.now" class="no-data" x-text="t('msg.no_current')"></div>
 
           <div x-show="ch.next" class="program next-program"
-               @click="showDetail(ch.next, ch.channel_name)" role="button">
+               @click="showDetail(ch.next, ch.channel_name, ch.sref)" role="button">
             <span class="next-label" x-text="t('label.next_prefix')"></span>
             <span x-text="ch.next?.title"></span>
             <small x-text="' · ' + formatTime(ch.next?.start_time)"></small>
@@ -442,6 +438,8 @@
         <button :class="dislikedIds.has(modalEvent?.id) ? 'dislike-btn disliked' : 'dislike-btn outline'"
                 @click="toggleDislike(modalEvent?.id)"
                 x-text="dislikedIds.has(modalEvent?.id) ? t('btn.undislike') : t('btn.dislike')"></button>
+        <button x-show="modalSref" class="watch-btn" @click="watchChannel(modalSref); modalOpen=false"
+                x-text="t('btn.watch')"></button>
       </footer>
     </article>
   </dialog>

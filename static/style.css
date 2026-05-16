@@ -200,15 +200,6 @@ nav details ul a {
   line-height: 1.4;
 }
 
-.rec-card footer {
-  padding: 0;
-  margin-top: 0.3rem;
-  border: none;
-  background: none;
-  display: flex;
-  justify-content: flex-end;
-}
-
 .watch-btn {
   padding: 0.3rem 0.9rem;
   font-size: 0.85rem;
