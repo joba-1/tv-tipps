@@ -433,12 +433,35 @@ def _extract_indices_from_text(text: str, max_count: int = 8) -> list[int]:
     return out
 
 
-async def _try_ollama(
+# Keep num_ctx (set in ollama.py) and budget aligned. We aim to stay well below
+# num_ctx so the model has room to generate a complete JSON response without
+# truncation — cutoff JSON would be unparseable.
+_NUM_CTX_TOKENS = 16384
+_PROMPT_TOKEN_BUDGET = 12000  # leaves ~4K for response
+_BATCH_SIZE = 40              # candidates per LLM call
+
+
+def _estimate_tokens(text: str) -> int:
+    """Rough conservative estimate; ~3 chars per token works for German +
+    structured text. Used only to warn / size batches, not to truncate."""
+    return max(1, len(text) // 3)
+
+
+async def _try_ollama_single_batch(
     user_name: str, context: str, profile: dict,
-    history: list[dict], likes: list[dict], dislikes: list[dict], candidates: list[EpgEvent], db: Session,
+    history: list[dict], likes: list[dict], dislikes: list[dict],
+    candidates: list[EpgEvent], db: Session,
 ) -> dict | None:
-    """Ask LLM to rank candidate indices, then fill in metadata server-side."""
+    """One LLM call over a single batch of candidates."""
     prompt = _build_prompt(user_name, context, profile, history, likes, dislikes, candidates, db)
+    est = _estimate_tokens(prompt)
+    if est > _PROMPT_TOKEN_BUDGET:
+        log.warning("recs.prompt_oversize",
+                    est_tokens=est, budget=_PROMPT_TOKEN_BUDGET,
+                    ctx=_NUM_CTX_TOKENS, candidates=len(candidates))
+    else:
+        log.info("recs.prompt_size", est_tokens=est, candidates=len(candidates))
+
     raw = await ask_json(prompt)
     if raw is None:
         log.warning("recommendations.bad_llm_response", raw_type="None", keys=None)
@@ -451,7 +474,7 @@ async def _try_ollama(
                         raw_type="dict", keys=list(raw.keys()))
             return None
     else:
-        # Raw text fallback for models that refuse JSON.
+        # Raw text fallback for models that refuse JSON (rare with format=json).
         indices = _extract_indices_from_text(raw)
         reasons, summary = {}, ""
         if not indices:
@@ -491,10 +514,72 @@ async def _try_ollama(
 
     if not items:
         return None
-    return {
-        "taste_summary": summary,
-        "recommendations": items,
-    }
+    return {"taste_summary": summary, "recommendations": items}
+
+
+async def _try_ollama(
+    user_name: str, context: str, profile: dict,
+    history: list[dict], likes: list[dict], dislikes: list[dict],
+    candidates: list[EpgEvent], db: Session,
+) -> dict | None:
+    """Rank candidates via the LLM. Splits into batches when the candidate list
+    is large, then runs a second-phase rerank over the merged survivors so the
+    final order reflects a global comparison, not just within-batch picks."""
+    if not candidates:
+        return None
+
+    if len(candidates) <= _BATCH_SIZE:
+        return await _try_ollama_single_batch(
+            user_name, context, profile, history, likes, dislikes, candidates, db
+        )
+
+    # Phase 1: split into batches and rank each
+    batches = [candidates[i:i + _BATCH_SIZE]
+               for i in range(0, len(candidates), _BATCH_SIZE)]
+    log.info("recs.batched", batches=len(batches),
+             candidates=len(candidates), batch_size=_BATCH_SIZE)
+
+    survivors: list[dict] = []
+    seen_ids: set[int] = set()
+    summary = ""
+    for idx, batch in enumerate(batches):
+        result = await _try_ollama_single_batch(
+            user_name, context, profile, history, likes, dislikes, batch, db
+        )
+        if result is None:
+            continue
+        if not summary and result.get("taste_summary"):
+            summary = result["taste_summary"]
+        for item in result.get("recommendations", []):
+            ev_id = item.get("id")
+            if ev_id in seen_ids:
+                continue
+            seen_ids.add(ev_id)
+            survivors.append(item)
+
+    if not survivors:
+        return None
+
+    # Few enough to skip Phase 2 — within-batch ranking is good enough.
+    if len(survivors) <= 8:
+        return {"taste_summary": summary, "recommendations": survivors}
+
+    # Phase 2: rerank the combined survivors so cross-batch order is consistent.
+    survivor_events: list[EpgEvent] = []
+    for item in survivors:
+        ev = db.get(EpgEvent, item["id"])
+        if ev:
+            survivor_events.append(ev)
+    log.info("recs.rerank", survivors=len(survivor_events))
+    final = await _try_ollama_single_batch(
+        user_name, context, profile, history, likes, dislikes, survivor_events, db
+    )
+    if final is not None:
+        if not final.get("taste_summary"):
+            final["taste_summary"] = summary
+        return final
+    # Phase 2 failed; degrade to Phase 1 top picks
+    return {"taste_summary": summary, "recommendations": survivors[:8]}
 
 
 def _save_cache(user_id: int, context: str, result: dict, ttl_min: int, db: Session) -> None:
