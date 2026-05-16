@@ -208,7 +208,7 @@
 
     <div x-show="!loadingEpg" class="epg-list">
       <template x-for="ev in epgEvents" :key="ev.id">
-        <article class="epg-row" @click="showDetail(ev, ev.channel_name)" role="button">
+        <article class="epg-row" :data-end="ev.end_time" @click="showDetail(ev, ev.channel_name)" role="button">
           <div class="epg-time"
                x-text="formatTime(ev.start_time) + ' – ' + formatTime(ev.end_time)"></div>
           <div class="epg-channel" x-text="ev.channel_name"></div>

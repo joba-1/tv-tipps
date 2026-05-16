@@ -265,10 +265,22 @@ function tvApp() {
         const res = await fetch(url, { credentials: "include" });
         if (!res.ok) throw new Error(res.statusText);
         this.epgEvents = await res.json();
+        this.$nextTick(() => this._epgScrollToNow());
       } catch (e) {
         console.error("loadEpg failed:", e);
       } finally {
         this.loadingEpg = false;
+      }
+    },
+
+    _epgScrollToNow() {
+      const now = new Date().toISOString();
+      const rows = document.querySelectorAll(".epg-row[data-end]");
+      for (const row of rows) {
+        if (row.dataset.end > now) {
+          row.scrollIntoView({ block: "start" });
+          return;
+        }
       }
     },
 
