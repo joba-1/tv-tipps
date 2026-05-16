@@ -307,7 +307,8 @@ nav details ul a {
 .epg-time    { grid-column: 1; grid-row: 1; font-size: 0.75rem; color: var(--pico-muted-color); white-space: nowrap; }
 .epg-channel { grid-column: 1; grid-row: 2; font-size: 0.75rem; font-weight: 600; color: var(--pico-primary); white-space: nowrap; }
 .epg-title   { grid-column: 2; grid-row: 1; font-weight: 500; }
-.epg-desc    { grid-column: 2; grid-row: 2; font-size: 0.78rem; color: var(--pico-muted-color); }
+.epg-desc    { grid-column: 2; grid-row: 2; font-size: 0.78rem; color: var(--pico-muted-color); white-space: pre-line; }
+.epg-text    { white-space: pre-line; }
 
 /* ---- Admin page ---- */
 .admin-receivers {
