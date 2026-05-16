@@ -91,6 +91,39 @@ def _cache_key(user_id: int, context: str) -> str:
     return hashlib.sha1(f"{user_id}:{context}".encode()).hexdigest()
 
 
+def _dedupe_candidates(events: list[EpgEvent], db: Session) -> list[EpgEvent]:
+    """When the same show airs simultaneously on multiple channels (parallel
+    feeds, e.g. ZDF + ZDFneo), keep only one. Major-channel airings win — they
+    have a stronger viewer signal and avoid the LLM ranking duplicates in
+    adjacent slots, which produced misleading match-% differences."""
+    if len(events) < 2:
+        return events
+    ch_ids = {ev.channel_id for ev in events}
+    channels = {c.id: c for c in db.query(Channel).filter(Channel.id.in_(ch_ids)).all()}
+
+    def is_major(ev: EpgEvent) -> bool:
+        ch = channels.get(ev.channel_id)
+        return bool(ch and ch.name.lower() in _MAJOR_CHANNELS)
+
+    winners: dict[tuple, EpgEvent] = {}
+    for ev in events:
+        title = (ev.title or "").strip().lower()
+        if not title:
+            continue  # untitled events bypass dedupe (kept individually)
+        key = (title, ev.start_time)
+        cur = winners.get(key)
+        if cur is None or (is_major(ev) and not is_major(cur)):
+            winners[key] = ev
+
+    winner_ids = {ev.id for ev in winners.values()}
+    out = [ev for ev in events
+           if ev.id in winner_ids or not (ev.title or "").strip()]
+    dropped = len(events) - len(out)
+    if dropped:
+        log.info("recs.deduped", dropped=dropped, kept=len(out))
+    return out
+
+
 def _epg_candidates(context: str, channel_ids: list[int], db: Session) -> list[EpgEvent]:
     if not channel_ids:
         return []
@@ -111,7 +144,9 @@ def _epg_candidates(context: str, channel_ids: list[int], db: Session) -> list[E
     else:
         return []
 
-    return q.order_by(EpgEvent.start_time).limit(100).all()
+    # Pull a few extra rows so the dedupe doesn't push us below 100 survivors.
+    raw = q.order_by(EpgEvent.start_time).limit(150).all()
+    return _dedupe_candidates(raw, db)[:100]
 
 
 def rule_based_rank(candidates: list[EpgEvent], context: str, db: Session) -> list[dict]:
