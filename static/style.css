@@ -50,20 +50,20 @@ nav details ul a {
 }
 
 .i18n-pending-banner {
-  background: rgba(100, 100, 200, 0.12);
-  color: var(--pico-muted-color);
+  background: rgba(60, 60, 60, 0.5);
+  color: #c8c8c8;
   padding: 0.35rem 1rem;
   font-size: 0.82rem;
-  border-bottom: 1px solid rgba(100, 100, 200, 0.25);
+  border-bottom: 1px solid rgba(150, 150, 150, 0.2);
 }
 
 .cold-start-banner {
-  background: rgba(100, 100, 200, 0.15);
-  border: 1px solid rgba(100, 100, 200, 0.3);
+  background: rgba(80, 50, 0, 0.4);
+  border: 1px solid rgba(200, 140, 0, 0.4);
   border-radius: 6px;
   padding: 0.6rem 1rem;
   font-size: 0.85rem;
-  color: var(--pico-muted-color);
+  color: #e8c97a;
   margin-bottom: 0.75rem;
 }
 
