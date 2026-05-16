@@ -391,14 +391,17 @@ def _parse_llm_ranking(raw: dict) -> tuple[list[int], dict[str, str], str]:
 
 
 def _extract_indices_from_text(text: str, max_count: int = 8) -> list[int]:
-    """Salvage indices from non-JSON model output like '[1]\\n[7]\\n[3]' or
-    '1. **[1]**'. Only bracketed numbers count — bare digits in prose are too
-    ambiguous (durations, channel ids, etc.)."""
-    if not isinstance(text, str):
+    """Salvage indices from non-JSON model output. Two safe shapes:
+      (1) bracketed: '[1]\\n[7]\\n[3]' or '1. **[1]**'
+      (2) pure numeric list: '3, 11, 12, 13' — only when the entire payload is
+          digits + separators, so prose digits ('5 stars', '2026') don't leak."""
+    if not isinstance(text, str) or not text.strip():
         return []
     import re as _re
     out: list[int] = []
     seen: set[int] = set()
+
+    # (1) Bracketed numbers — preferred, never picks up prose digits.
     for m in _re.finditer(r"\[(\d+)\]", text):
         try:
             n = int(m.group(1))
@@ -409,7 +412,24 @@ def _extract_indices_from_text(text: str, max_count: int = 8) -> list[int]:
         seen.add(n)
         out.append(n)
         if len(out) >= max_count:
-            break
+            return out
+    if out:
+        return out
+
+    # (2) Pure numeric list — fall through only if the entire response is
+    # digits + separators (commas, semicolons, dots, whitespace, hyphens).
+    if _re.fullmatch(r"[\s\d,;.\-]+", text):
+        for m in _re.finditer(r"\d+", text):
+            try:
+                n = int(m.group(0))
+            except ValueError:
+                continue
+            if n in seen or n == 0:
+                continue
+            seen.add(n)
+            out.append(n)
+            if len(out) >= max_count:
+                break
     return out
 
 
