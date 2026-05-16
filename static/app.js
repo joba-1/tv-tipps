@@ -25,6 +25,11 @@ function tvApp() {
     zapToast: "",
     _zapTimer: null,
 
+    // Cross-context match lookup: event_id → match_score (0..1). Built from all
+    // four contexts so EPG / Now-Next can show the same badge when the AI also
+    // picked that event in some Tips view.
+    recsMap: {},
+
     // Now & Next
     nowNext: [],
     loadingNow: false,
@@ -129,8 +134,8 @@ function tvApp() {
         this.page = hash || "recs";
         if (prevPage === "remote" && this.page !== "remote") this._stopScreenshotPoll();
         if (prevPage === "recs"   && this.page !== "recs")   this._cancelFastRecsPoll();
-        if (this.page === "epg")    this.loadEpg();
-        if (this.page === "now")    this.loadNowNext();
+        if (this.page === "epg")    { this.loadEpg();     this.loadRecsMap(); }
+        if (this.page === "now")    { this.loadNowNext(); this.loadRecsMap(); }
         if (this.page === "recs")   this.loadRecs();
         if (this.page === "admin")  this.loadAdminStatus();
         if (this.page === "remote") this._startScreenshotPoll();
@@ -161,7 +166,8 @@ function tvApp() {
       setInterval(() => this.loadReceivers(), 30_000);
       setInterval(() => {
         if (this.page === "recs") this.loadRecs();
-        if (this.page === "now")  this.loadNowNext();
+        if (this.page === "now")  { this.loadNowNext(); this.loadRecsMap(); }
+        if (this.page === "epg")  this.loadRecsMap();
       }, 120_000);
     },
 
@@ -241,6 +247,33 @@ function tvApp() {
         clearTimeout(this._fastRecsTimer);
         this._fastRecsTimer = null;
       }
+    },
+
+    async loadRecsMap() {
+      // Aggregate AI picks across all contexts → { event_id: match_score }.
+      // All four calls hit warm caches (~5 ms each).
+      const map = {};
+      const ctxs = ["now", "next", "prime", "today"];
+      await Promise.all(ctxs.map(async (ctx) => {
+        try {
+          const res = await fetch(`/api/recommendations?context=${ctx}`,
+                                  { credentials: "include" });
+          if (!res.ok) return;
+          const data = await res.json();
+          for (const r of (data.recommendations || [])) {
+            if (!r.id) continue;
+            // When the same event is picked in multiple contexts, keep the strongest match.
+            if (!(r.id in map) || r.match_score > map[r.id]) {
+              map[r.id] = r.match_score;
+            }
+          }
+        } catch (_) {}
+      }));
+      this.recsMap = map;
+    },
+
+    recsMatch(eventId) {
+      return this.recsMap[eventId];  // undefined → no badge
     },
 
     setRecsContext(ctx) {
@@ -655,10 +688,11 @@ function tvApp() {
       this.currentUser = this.users.find(u => u.slug === slug) || this.users[0];
       document.cookie = `tv_tips_user=${slug}; path=/; max-age=31536000; SameSite=Lax`;
       this.recsData = null;
+      this.recsMap = {};
       await this.loadLikes();
       if (this.page === "recs") await this.loadRecs();
-      if (this.page === "now")  await this.loadNowNext();
-      if (this.page === "epg")  await this.loadEpg();
+      if (this.page === "now")  { await this.loadNowNext(); this.loadRecsMap(); }
+      if (this.page === "epg")  { await this.loadEpg();     this.loadRecsMap(); }
     },
 
     setReceiver(name) {
