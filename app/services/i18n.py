@@ -96,7 +96,7 @@ async def translate_missing(lang: str, missing: list[str]) -> None:
         log.info("i18n.batch_start", lang=lang, keys=len(payload))
 
         result = await ask_json(prompt)
-        if not result or "translations" not in result:
+        if not isinstance(result, dict) or "translations" not in result:
             log.warning("i18n.batch_failed", lang=lang)
             return
 

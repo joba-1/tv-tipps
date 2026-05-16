@@ -370,6 +370,29 @@ def _parse_llm_ranking(raw: dict) -> tuple[list[int], dict[str, str], str]:
     return indices, reasons, summary
 
 
+def _extract_indices_from_text(text: str, max_count: int = 8) -> list[int]:
+    """Salvage indices from non-JSON model output like '[1]\\n[7]\\n[3]' or
+    '1. **[1]**'. Only bracketed numbers count — bare digits in prose are too
+    ambiguous (durations, channel ids, etc.)."""
+    if not isinstance(text, str):
+        return []
+    import re as _re
+    out: list[int] = []
+    seen: set[int] = set()
+    for m in _re.finditer(r"\[(\d+)\]", text):
+        try:
+            n = int(m.group(1))
+        except ValueError:
+            continue
+        if n in seen:
+            continue
+        seen.add(n)
+        out.append(n)
+        if len(out) >= max_count:
+            break
+    return out
+
+
 async def _try_ollama(
     user_name: str, context: str, profile: dict,
     history: list[dict], likes: list[dict], dislikes: list[dict], candidates: list[EpgEvent], db: Session,
@@ -377,16 +400,25 @@ async def _try_ollama(
     """Ask LLM to rank candidate indices, then fill in metadata server-side."""
     prompt = _build_prompt(user_name, context, profile, history, likes, dislikes, candidates, db)
     raw = await ask_json(prompt)
-    if not raw or not isinstance(raw, dict):
-        log.warning("recommendations.bad_llm_response",
-                    raw_type=type(raw).__name__, keys=None)
+    if raw is None:
+        log.warning("recommendations.bad_llm_response", raw_type="None", keys=None)
         return None
 
-    indices, reasons, summary = _parse_llm_ranking(raw)
-    if not indices:
-        log.warning("recommendations.bad_llm_response",
-                    raw_type="dict", keys=list(raw.keys()))
-        return None
+    if isinstance(raw, dict):
+        indices, reasons, summary = _parse_llm_ranking(raw)
+        if not indices:
+            log.warning("recommendations.bad_llm_response",
+                        raw_type="dict", keys=list(raw.keys()))
+            return None
+    else:
+        # Raw text fallback for models that refuse JSON.
+        indices = _extract_indices_from_text(raw)
+        reasons, summary = {}, ""
+        if not indices:
+            log.warning("recommendations.bad_llm_response",
+                        raw_type="str", keys=None)
+            return None
+        log.info("recommendations.salvaged_from_text", count=len(indices))
 
     # Build candidate lookup by 1-based index
     indexed: dict[int, tuple[EpgEvent, object]] = {}
