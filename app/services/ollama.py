@@ -8,9 +8,12 @@ from config import settings
 log = get_logger(__name__)
 
 _TIMEOUT = httpx.Timeout(240.0)
-# temperature=0 → fully deterministic, max coherence with schema instructions.
-# num_ctx=16384 → fits the largest prompts ("today" with 100 candidates + history).
-_OPTIONS = {"num_ctx": 16384, "temperature": 0.0}
+# format=json (set on payload) already grammar-constrains the OUTPUT shape, so we
+# can give temperature room for ranking variety without risking structure drift.
+# temperature=0.2 → still mostly deterministic on strong signals, lets ties between
+#                   similar-strength candidates break differently across calls.
+# num_ctx=16384  → fits the largest prompts ("today" with 100 candidates + history).
+_OPTIONS = {"num_ctx": 16384, "temperature": 0.2}
 
 
 async def ask_json(prompt: str) -> dict | str | None:
