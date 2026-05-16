@@ -127,7 +127,17 @@ nav details ul a {
   margin: 0;
   cursor: pointer;
   align-items: flex-start;
+  /* role="button" inherits Pico's button styling — kill the parts that fight us */
+  text-align: left;
+  background: transparent;
+  color: inherit;
+  border: 0;
   border-left: 4px solid transparent;
+  border-radius: 0;
+  box-shadow: none;
+  font-weight: inherit;
+  font-size: inherit;
+  line-height: inherit;
 }
 .event-row:hover { background: var(--pico-card-sectioning-background-color); }
 .event-row.live {
