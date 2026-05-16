@@ -12,6 +12,7 @@
   "context.today": "Today",
 
   "btn.watch": "▶ Watch",
+  "btn.record": "⏺ Record",
   "btn.refresh": "↺",
   "btn.wake": "⚡ Wake",
   "btn.sleep": "💤 Sleep",
@@ -31,6 +32,8 @@
   "msg.zap_woke": "⚡ {receiver} woken & switched",
   "msg.zap_ok": "▶ Switched to {receiver}",
   "msg.zap_fail": "⚠️ Zap failed",
+  "msg.record_ok": "⏺ Recording timer set on {receiver}",
+  "msg.record_fail": "⚠️ Could not set recording timer",
   "msg.connect_error": "⚠️ Connection error",
   "msg.refresh_ok": "✓ {target} refreshed",
   "msg.refresh_error": "⚠️ Error",

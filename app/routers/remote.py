@@ -21,6 +21,15 @@ class KeyRequest(BaseModel):
     receiver: str | None = None
 
 
+class TimerRequest(BaseModel):
+    sref: str
+    start_time: str   # naive UTC ISO (matches our EPG output)
+    end_time: str     # naive UTC ISO
+    title: str
+    short_desc: str | None = None
+    receiver: str | None = None
+
+
 async def _find_receiver(preferred_name: str | None):
     """Return (rcfg, client) for the requested receiver.
 
@@ -91,6 +100,39 @@ async def send_key(req: KeyRequest):
     ok = await client.send_key(req.key)
     log.info("remote.key", receiver=rcfg.name, key=req.key, ok=ok)
     return {"ok": ok, "receiver_name": rcfg.name}
+
+
+@router.post("/api/remote/record")
+async def add_record_timer(req: TimerRequest):
+    """Program a recording timer on the receiver for the given event."""
+    from datetime import datetime, timezone
+    rcfg, client = await _find_receiver(req.receiver)
+    if rcfg is None or client is None:
+        raise HTTPException(503, "No receiver available")
+    if not await client.is_online():
+        raise HTTPException(503, f"{rcfg.name} is offline — wake it first")
+
+    try:
+        start = datetime.fromisoformat(req.start_time)
+        end = datetime.fromisoformat(req.end_time)
+    except ValueError:
+        raise HTTPException(400, "Invalid start_time/end_time")
+
+    # Naive UTC → epoch; pad 2 min before, 5 min after (broadcast slip).
+    begin_ts = int(start.replace(tzinfo=timezone.utc).timestamp()) - 120
+    end_ts = int(end.replace(tzinfo=timezone.utc).timestamp()) + 300
+
+    ok = await client.add_timer(
+        sref=req.sref, begin=begin_ts, end=end_ts,
+        name=req.title, description=req.short_desc or "",
+    )
+    log.info("remote.record", receiver=rcfg.name, sref=req.sref,
+             title=req.title, ok=ok)
+    return {
+        "ok": ok,
+        "receiver_name": rcfg.name,
+        "receiver_location": rcfg.location or rcfg.name,
+    }
 
 
 @router.get("/api/remote/screenshot")

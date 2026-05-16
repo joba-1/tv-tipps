@@ -109,6 +109,26 @@ class EnigmaClient:
         data = await self._get("/api/zap", params={"sRef": sref})
         return bool(data and data.get("result"))
 
+    async def add_timer(
+        self, sref: str, begin: int, end: int, name: str,
+        description: str = "", justplay: int = 0,
+    ) -> bool:
+        """Schedule a recording timer via OpenWebif /api/timeradd.
+        `begin`/`end` are unix epoch seconds. `justplay=0` records, `1` just zaps."""
+        params = {
+            "sRef": sref,
+            "begin": str(begin),
+            "end": str(end),
+            "name": name,
+            "description": description or "",
+            "repeated": "0",
+            "afterEvent": "3",  # auto: receiver decides standby/deep-standby
+            "disabled": "0",
+            "justplay": str(justplay),
+        }
+        data = await self._get("/api/timeradd", params=params)
+        return bool(data and data.get("result"))
+
     async def send_key(self, key_name: str) -> bool:
         code = RC_KEYS.get(key_name)
         if code is None:

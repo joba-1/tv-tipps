@@ -463,6 +463,8 @@
                 x-text="dislikedIds.has(modalEvent?.id) ? t('btn.undislike') : t('btn.dislike')"></button>
         <button x-show="modalSref && modalIsLive" class="watch-btn" @click="watchChannel(modalSref); modalOpen=false"
                 x-text="t('btn.watch')"></button>
+        <button x-show="canRecord()" class="record-btn" @click="recordEvent(); modalOpen=false"
+                x-text="t('btn.record')"></button>
       </footer>
     </article>
   </dialog>

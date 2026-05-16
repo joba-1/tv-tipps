@@ -234,6 +234,15 @@ nav details ul a {
   font-size: 0.85rem;
   margin: 0;
 }
+.record-btn {
+  padding: 0.3rem 0.9rem;
+  font-size: 0.85rem;
+  margin: 0;
+  background: #c0392b;
+  border-color: #c0392b;
+  color: #fff;
+}
+.record-btn:hover { background: #a93226; border-color: #a93226; }
 
 /* Toast notification */
 .toast {

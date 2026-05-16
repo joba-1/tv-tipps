@@ -283,6 +283,40 @@ function tvApp() {
       this.loadRecs();
     },
 
+    canRecord() {
+      // A recording timer makes sense only for events that haven't ended yet.
+      const end = this._parseEventTime(this.modalEvent?.end_time);
+      return !!(this.modalSref && end && end.getTime() > Date.now());
+    },
+
+    async recordEvent() {
+      if (!this.modalSref || !this.modalEvent) return;
+      try {
+        const body = {
+          sref: this.modalSref,
+          start_time: this.modalEvent.start_time,
+          end_time: this.modalEvent.end_time,
+          title: this.modalEvent.title || "",
+          short_desc: this.modalEvent.short_desc || "",
+        };
+        if (this.selectedReceiver) body.receiver = this.selectedReceiver.name;
+        const res = await fetch("/api/remote/record", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+        });
+        const data = await res.json();
+        if (data.ok) {
+          this._toast(this.t("msg.record_ok",
+            { receiver: data.receiver_location || data.receiver_name }));
+        } else {
+          this._toast(this.t("msg.record_fail"));
+        }
+      } catch (_) {
+        this._toast(this.t("msg.connect_error"));
+      }
+    },
+
     async watchChannel(sref) {
       try {
         const body = { sref };
