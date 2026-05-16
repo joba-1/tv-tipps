@@ -295,11 +295,79 @@ LETZTE SEHHISTORIE:
 KANDIDATENLISTE:
 {cand_str}
 
-JSON-Antwort (genau dieses Format, keine anderen Felder):
-{{"taste_summary": "Ein Satz über {user_name}s Geschmack", "ranking": [nr1, nr2, nr3, ...], "reasons": {{"nr": "Ein Satz Begründung"}}}}
+ANTWORT-FORMAT — exakt diese JSON-Struktur, KEINE anderen Felder, KEINE Markdown-Codeblöcke, KEIN Text außerhalb des JSON.
+Pflichtfelder mit genau diesen Schlüsseln in Kleinbuchstaben: "taste_summary", "ranking", "reasons".
+"ranking" ist eine Liste von 5–8 Ganzzahlen (Indizes aus der KANDIDATENLISTE oben), absteigend nach Passgenauigkeit.
+"reasons" ist eine Map: Schlüssel = die Indizes als Strings, Wert = ein Satz Begründung.
 
-Regeln: 5–8 Nummern aus der Liste, nach Passgenauigkeit absteigend.
-Wenn ein Kandidat den Hinweis "bereits X% gelaufen" trägt, dann gilt: je höher der Wert, desto weniger attraktiv (man verpasst den Anfang) — bevorzuge frischere Sendungen mit ähnlicher Passung."""
+Konkretes Beispiel (mit Beispiel-Zahlen, ersetze sie durch die tatsächlich passenden Indizes):
+{{"taste_summary":"{user_name} mag Sci-Fi und Doku.","ranking":[3,1,7,2,5],"reasons":{{"3":"Sci-Fi-Serie, passt zum Profil.","1":"Hochwertige Doku.","7":"Action-Thriller wie zuletzt geschaut.","2":"Klassischer Film.","5":"Wissenschaftsmagazin."}}}}
+
+Wenn ein Kandidat den Hinweis "bereits X% gelaufen" trägt, dann gilt: je höher der Wert, desto weniger attraktiv — bevorzuge frischere Sendungen mit ähnlicher Passung.
+
+Antworte JETZT NUR mit dem JSON-Objekt, beginnend mit {{ und endend mit }}."""
+
+
+_RANKING_KEYS = ("ranking", "recommendations", "ranked", "ranking_indices", "indices", "tipps", "tips")
+_INDEX_KEYS = ("nr", "index", "rank", "candidate", "id", "number", "nummer", "no")
+_REASON_KEYS = ("reason", "begründung", "begruendung", "explanation", "warum")
+_SUMMARY_KEYS = ("taste_summary", "summary", "zusammenfassung", "geschmack")
+
+
+def _parse_llm_ranking(raw: dict) -> tuple[list[int], dict[str, str], str]:
+    """Extract (indices, reasons_by_idx, taste_summary) from a model dict.
+    Tolerates several plausible shapes since small models drift from the
+    requested schema. Returns ([], {}, "") if nothing usable can be salvaged."""
+    # Find the ranked list
+    ranked = None
+    for k in _RANKING_KEYS:
+        v = raw.get(k)
+        if isinstance(v, list):
+            ranked = v
+            break
+    if ranked is None:
+        return [], {}, ""
+
+    indices: list[int] = []
+    embedded: dict[str, str] = {}
+    for item in ranked:
+        idx = None
+        if isinstance(item, int):
+            idx = item
+        elif isinstance(item, str):
+            try:
+                idx = int(item.strip())
+            except ValueError:
+                pass
+        elif isinstance(item, dict):
+            for ik in _INDEX_KEYS:
+                if ik in item:
+                    try:
+                        idx = int(item[ik])
+                        break
+                    except (TypeError, ValueError):
+                        pass
+            for rk in _REASON_KEYS:
+                if idx is not None and item.get(rk):
+                    embedded[str(idx)] = str(item[rk])
+                    break
+        if idx is not None:
+            indices.append(idx)
+
+    # Explicit reasons block takes priority over embedded ones
+    reasons = embedded
+    explicit = raw.get("reasons")
+    if isinstance(explicit, dict):
+        reasons = {**embedded, **{str(k): str(v) for k, v in explicit.items()}}
+
+    summary = ""
+    for sk in _SUMMARY_KEYS:
+        v = raw.get(sk)
+        if isinstance(v, str) and v.strip():
+            summary = v.strip()
+            break
+
+    return indices, reasons, summary
 
 
 async def _try_ollama(
@@ -309,8 +377,15 @@ async def _try_ollama(
     """Ask LLM to rank candidate indices, then fill in metadata server-side."""
     prompt = _build_prompt(user_name, context, profile, history, likes, dislikes, candidates, db)
     raw = await ask_json(prompt)
-    if not raw or not isinstance(raw, dict) or "ranking" not in raw:
-        log.warning("recommendations.bad_llm_response", raw_type=type(raw).__name__, keys=list(raw.keys()) if isinstance(raw, dict) else None)
+    if not raw or not isinstance(raw, dict):
+        log.warning("recommendations.bad_llm_response",
+                    raw_type=type(raw).__name__, keys=None)
+        return None
+
+    indices, reasons, summary = _parse_llm_ranking(raw)
+    if not indices:
+        log.warning("recommendations.bad_llm_response",
+                    raw_type="dict", keys=list(raw.keys()))
         return None
 
     # Build candidate lookup by 1-based index
@@ -320,18 +395,13 @@ async def _try_ollama(
         if ch:
             indexed[i + 1] = (ev, ch)
 
-    reasons: dict = raw.get("reasons") or {}
     items = []
     now = utcnow()
-    for nr in raw["ranking"]:
-        try:
-            nr_int = int(nr)
-        except (TypeError, ValueError):
-            continue
+    for nr_int in indices:
         if nr_int not in indexed:
             continue
         ev, ch = indexed[nr_int]
-        score = (len(raw["ranking"]) - len(items)) / len(raw["ranking"])
+        score = (len(indices) - len(items)) / max(1, len(indices))
         items.append({
             "id": ev.id,
             "sref": ch.sref,
@@ -344,13 +414,13 @@ async def _try_ollama(
             "genre": ev.genre,
             "progress_pct": _progress_pct(ev, now),
             "match_score": round(score, 2),
-            "reason": reasons.get(str(nr_int), reasons.get(str(nr), "")),
+            "reason": reasons.get(str(nr_int), ""),
         })
 
     if not items:
         return None
     return {
-        "taste_summary": raw.get("taste_summary", ""),
+        "taste_summary": summary,
         "recommendations": items,
     }
 

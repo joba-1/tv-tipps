@@ -41,7 +41,9 @@ async def ask_json(prompt: str) -> dict | None:
             log.warning("ollama.request_failed", attempt=attempt, error=str(e))
             return None
         except (json.JSONDecodeError, ValueError) as e:
-            log.warning("ollama.parse_failed", attempt=attempt, error=str(e))
+            snippet = raw[:400] if isinstance(raw, str) else ""
+            log.warning("ollama.parse_failed", attempt=attempt, error=str(e),
+                        raw_snippet=snippet)
             if attempt == 0:
                 payload["prompt"] = (
                     prompt
