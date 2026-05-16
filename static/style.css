@@ -263,17 +263,22 @@ nav details ul a {
 /* Toast notification */
 .toast {
   position: fixed;
-  bottom: 1.5rem;
+  top: calc(env(safe-area-inset-top) + 4rem);
   left: 50%;
   transform: translateX(-50%);
-  background: var(--pico-card-background-color);
-  border: 1px solid var(--pico-muted-border-color);
-  border-radius: 8px;
-  padding: 0.6rem 1.2rem;
-  font-size: 0.9rem;
-  z-index: 999;
-  box-shadow: 0 4px 12px rgba(0,0,0,0.3);
-  white-space: nowrap;
+  max-width: 90vw;
+  background: #2563eb;
+  color: #fff;
+  border: 1px solid #1d4ed8;
+  border-radius: 10px;
+  padding: 0.8rem 1.4rem;
+  font-size: 1rem;
+  font-weight: 500;
+  z-index: 10000;
+  box-shadow: 0 6px 20px rgba(0,0,0,0.45);
+  white-space: pre-wrap;
+  pointer-events: none;
+  text-align: center;
 }
 
 /* ---- Admin page ---- */

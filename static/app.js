@@ -429,9 +429,10 @@ function tvApp() {
     },
 
     _toast(msg) {
+      console.log("[toast]", msg);  // visible in Safari Web Inspector if user enables it
       this.zapToast = msg;
       clearTimeout(this._zapTimer);
-      this._zapTimer = setTimeout(() => { this.zapToast = ""; }, 3500);
+      this._zapTimer = setTimeout(() => { this.zapToast = ""; }, 5000);
     },
 
     // ── Now & Next ──────────────────────────────────────────────────────────
