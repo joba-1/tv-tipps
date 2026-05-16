@@ -123,6 +123,14 @@
             <span class="rec-score-label"
                   x-text="t('label.match', { pct: Math.round(rec.match_score*100) })"></span>
           </div>
+          <div class="rec-progress" x-show="rec.progress_pct > 0"
+               :title="t('label.progress', { pct: Math.round(rec.progress_pct) })">
+            <div class="rec-progress-bar">
+              <div class="rec-progress-fill" :style="'width:' + rec.progress_pct + '%'"></div>
+            </div>
+            <span class="rec-progress-label"
+                  x-text="t('label.progress', { pct: Math.round(rec.progress_pct) })"></span>
+          </div>
           <div class="rec-reason" x-text="rec.reason"></div>
         </article>
       </template>

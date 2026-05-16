@@ -69,6 +69,7 @@ class RecommendationItem(BaseModel):
     start_time: str | None = None
     end_time: str | None = None
     genre: str | None = None
+    progress_pct: float = 0.0
     match_score: float = 0.5
     reason: str = ""
 

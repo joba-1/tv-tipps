@@ -28,6 +28,16 @@ _MAJOR_CHANNELS = {
 _CACHE_TTL = {"now": 30, "next": 30, "prime": 120, "today": 360}
 
 
+def _progress_pct(ev: EpgEvent, now) -> float:
+    """How far into the event we are (0..100). 0 for not-yet-started/no-duration."""
+    if not ev.duration_sec or ev.duration_sec <= 0:
+        return 0.0
+    elapsed = (now - ev.start_time).total_seconds()
+    if elapsed <= 0:
+        return 0.0
+    return round(min(100.0, elapsed / ev.duration_sec * 100), 1)
+
+
 def _cache_key(user_id: int, context: str) -> str:
     return hashlib.sha1(f"{user_id}:{context}".encode()).hexdigest()
 
@@ -39,7 +49,8 @@ def _epg_candidates(context: str, channel_ids: list[int], db: Session) -> list[E
     q = db.query(EpgEvent).filter(EpgEvent.channel_id.in_(channel_ids))
 
     if context == "now":
-        q = q.filter(EpgEvent.start_time <= now, EpgEvent.end_time > now)
+        # Skip events with less than 10 min remaining — not worth recommending.
+        q = q.filter(EpgEvent.start_time <= now, EpgEvent.end_time > now + timedelta(minutes=10))
     elif context == "next":
         q = q.filter(EpgEvent.start_time >= now, EpgEvent.start_time <= now + timedelta(hours=2))
     elif context == "prime":
@@ -55,6 +66,7 @@ def _epg_candidates(context: str, channel_ids: list[int], db: Session) -> list[E
 
 
 def rule_based_rank(candidates: list[EpgEvent], context: str, db: Session) -> list[dict]:
+    now = utcnow()
     scored = []
     for ev in candidates:
         ch = db.get(Channel, ev.channel_id)
@@ -77,7 +89,11 @@ def rule_based_rank(candidates: list[EpgEvent], context: str, db: Session) -> li
         if ch.name.lower() in _MAJOR_CHANNELS:
             score += 0.2
 
-        scored.append((score, ev, ch))
+        progress = _progress_pct(ev, now)
+        # Penalty for shows already mostly done — only 10% left is less useful than catching 90%.
+        score -= (progress / 100) * 0.4
+
+        scored.append((score, progress, ev, ch))
 
     scored.sort(key=lambda x: -x[0])
     return [
@@ -91,10 +107,11 @@ def rule_based_rank(candidates: list[EpgEvent], context: str, db: Session) -> li
             "start_time": ev.start_time.isoformat(),
             "end_time": ev.end_time.isoformat(),
             "genre": ev.genre,
+            "progress_pct": progress,
             "match_score": round(max(0.0, min(1.0, 0.5 + score)), 2),
             "reason": "Populärer Sender und passende Sendezeit",
         }
-        for score, ev, ch in scored[:8]
+        for score, progress, ev, ch in scored[:8]
     ]
 
 
@@ -183,6 +200,7 @@ def _build_prompt(
     ]
     dislikes_str = "\n".join(dislikes_lines) if dislikes_lines else "  (keine)"
 
+    now = utcnow()
     cand_lines = []
     for i, ev in enumerate(candidates):
         ch = db.get(Channel, ev.channel_id)
@@ -191,10 +209,15 @@ def _build_prompt(
         dur_min = (ev.duration_sec or 0) // 60
         desc = (ev.short_desc or "").replace("\n", " ").strip()[:80]
         desc_part = f" | {desc}" if desc else ""
+        progress_part = ""
+        if context == "now":
+            p = _progress_pct(ev, now)
+            if p > 0:
+                progress_part = f" | bereits {p:.0f}% gelaufen"
         cand_lines.append(
             f"  [{i+1}] {ch.name} | {ev.title} | "
             f"{to_local_str(ev.start_time)}–{to_local_str(ev.end_time)} | "
-            f"{ev.genre or '-'} | {dur_min} min{desc_part}"
+            f"{ev.genre or '-'} | {dur_min} min{progress_part}{desc_part}"
         )
     cand_str = "\n".join(cand_lines) if cand_lines else "  (keine Sendungen)"
 
@@ -225,7 +248,8 @@ KANDIDATENLISTE:
 JSON-Antwort (genau dieses Format, keine anderen Felder):
 {{"taste_summary": "Ein Satz über {user_name}s Geschmack", "ranking": [nr1, nr2, nr3, ...], "reasons": {{"nr": "Ein Satz Begründung"}}}}
 
-Regeln: 5–8 Nummern aus der Liste, nach Passgenauigkeit absteigend."""
+Regeln: 5–8 Nummern aus der Liste, nach Passgenauigkeit absteigend.
+Wenn ein Kandidat den Hinweis "bereits X% gelaufen" trägt, dann gilt: je höher der Wert, desto weniger attraktiv (man verpasst den Anfang) — bevorzuge frischere Sendungen mit ähnlicher Passung."""
 
 
 async def _try_ollama(
@@ -248,6 +272,7 @@ async def _try_ollama(
 
     reasons: dict = raw.get("reasons") or {}
     items = []
+    now = utcnow()
     for nr in raw["ranking"]:
         try:
             nr_int = int(nr)
@@ -267,6 +292,7 @@ async def _try_ollama(
             "start_time": ev.start_time.isoformat(),
             "end_time": ev.end_time.isoformat(),
             "genre": ev.genre,
+            "progress_pct": _progress_pct(ev, now),
             "match_score": round(score, 2),
             "reason": reasons.get(str(nr_int), reasons.get(str(nr), "")),
         })

@@ -161,8 +161,8 @@ nav details ul a {
 
 .rec-genre {
   font-size: 0.75rem;
-  color: var(--pico-muted-color);
-  background: var(--pico-card-sectioning-background-color);
+  color: #d4d8e0;
+  background: rgba(255, 255, 255, 0.08);
   padding: 1px 6px;
   border-radius: 10px;
   white-space: nowrap;
@@ -188,8 +188,8 @@ nav details ul a {
 
 .rec-score-label {
   font-size: 0.75rem;
-  color: var(--pico-muted-color);
-  min-width: 2.5rem;
+  color: #b0bcc0;
+  white-space: nowrap;
   text-align: right;
 }
 
@@ -198,6 +198,30 @@ nav details ul a {
   color: var(--pico-muted-color);
   font-style: italic;
   line-height: 1.4;
+}
+
+.rec-progress {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+.rec-progress-bar {
+  flex: 1;
+  height: 4px;
+  background: rgba(255, 255, 255, 0.08);
+  border-radius: 2px;
+  overflow: hidden;
+}
+.rec-progress-fill {
+  height: 100%;
+  background: #52b788;
+  border-radius: 2px;
+  transition: width 0.4s;
+}
+.rec-progress-label {
+  font-size: 0.72rem;
+  color: #b0bcc0;
+  white-space: nowrap;
 }
 
 .watch-btn {
@@ -352,8 +376,8 @@ nav details ul a {
 
 .flag-badge {
   font-size: 0.72rem;
-  background: var(--pico-card-sectioning-background-color);
-  color: var(--pico-muted-color);
+  background: rgba(255, 255, 255, 0.08);
+  color: #d4d8e0;
   padding: 1px 6px;
   border-radius: 10px;
 }
@@ -384,10 +408,10 @@ nav details ul a {
 .admin-user-row {
   display: flex; align-items: center; gap: 0.75rem;
   padding: 0.35rem 0.5rem;
-  background: var(--pico-card-sectioning-background-color);
+  background: rgba(255, 255, 255, 0.06);
   border-radius: 6px;
 }
-.admin-user-row small { color: var(--pico-muted-color); flex: 1; }
+.admin-user-row small { color: #c8ccd4; flex: 1; }
 
 .admin-delete-btn { padding: 0.2rem 0.6rem !important; font-size: 0.78rem; margin: 0; }
 

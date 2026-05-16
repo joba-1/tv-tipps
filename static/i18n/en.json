@@ -39,7 +39,8 @@
   "msg.power_error": "⚠️ {error}",
 
   "label.updated": "Updated {time}",
-  "label.match": "{pct}%",
+  "label.match": "Match: {pct}%",
+  "label.progress": "{pct}% played",
   "label.rank": "#{n}",
   "label.prio": "Prio {n}",
   "label.epg_2h": "+2h",
