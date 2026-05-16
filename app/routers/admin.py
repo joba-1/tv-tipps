@@ -28,6 +28,8 @@ class ReceiverCreateRequest(BaseModel):
     priority: int = 99
     power_method: str = "none"
     wol_mac: str | None = None
+    intertechno_family: str = ""
+    intertechno_device: int = 1
     has_genre: bool = False
     default_user: str | None = None
 
@@ -53,6 +55,8 @@ async def list_receivers(db: Session = Depends(get_db)):
             "power_state": power_state,
             "last_seen": receiver.last_seen.isoformat() if receiver and receiver.last_seen else None,
             "wol_mac": rcfg.wol_mac,
+            "intertechno_family": rcfg.intertechno_family,
+            "intertechno_device": rcfg.intertechno_device,
         })
     return result
 
@@ -64,6 +68,7 @@ def create_receiver(req: ReceiverCreateRequest, db: Session = Depends(get_db)):
     r = Receiver(
         name=req.name, ip=req.ip, location=req.location, priority=req.priority,
         power_method=req.power_method, wol_mac=req.wol_mac or None,
+        intertechno_family=req.intertechno_family, intertechno_device=req.intertechno_device,
         has_genre=req.has_genre, default_user=req.default_user,
         power_state="unknown",
     )

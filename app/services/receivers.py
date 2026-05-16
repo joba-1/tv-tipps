@@ -25,5 +25,7 @@ def _to_rcfg(r: Receiver) -> ReceiverConfig:
         has_genre=bool(r.has_genre),
         wol_mac=r.wol_mac,
         power_method=r.power_method or "none",
+        intertechno_family=r.intertechno_family or "",
+        intertechno_device=r.intertechno_device if r.intertechno_device is not None else 1,
         location=r.location or "",
     )

@@ -51,7 +51,7 @@ function tvApp() {
     prefsDraft: {},      // slug → current textarea value (editable)
     prefsSaved: {},      // slug → last saved value (for dirty detection)
     prefsSaving: null,   // slug currently being saved (disables button)
-    newReceiver: { name: "", ip: "", location: "", priority: 99, power_method: "none", wol_mac: "", has_genre: false },
+    newReceiver: { name: "", ip: "", location: "", priority: 99, power_method: "none", wol_mac: "", intertechno_family: "", intertechno_device: 1, has_genre: false },
     newUser: { slug: "", name: "" },
 
     // Remote control
@@ -427,6 +427,7 @@ function tvApp() {
       try {
         const body = { ...this.newReceiver };
         if (!body.wol_mac) delete body.wol_mac;
+        if (body.power_method !== "intertechno") { delete body.intertechno_family; delete body.intertechno_device; }
         const res = await fetch("/api/admin/receivers", {
           method: "POST", headers: { "Content-Type": "application/json" },
           body: JSON.stringify(body),

@@ -48,8 +48,8 @@ async def _wol_sleep(rcfg: ReceiverConfig) -> bool:
 
 async def _intertechno_power(rcfg: ReceiverConfig, on: bool) -> bool:
     url = settings.intertechno_url
-    family = settings.intertechno_family
-    device = settings.intertechno_device
+    family = rcfg.intertechno_family or settings.intertechno_family
+    device = rcfg.intertechno_device if rcfg.intertechno_family else settings.intertechno_device
     if not url or not family:
         log.warning("power.intertechno_skipped", receiver=rcfg.name, reason="not configured")
         return False

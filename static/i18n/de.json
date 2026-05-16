@@ -67,6 +67,8 @@
   "label.receiver_priority": "Priorität",
   "label.receiver_power_method": "Einschalt-Methode",
   "label.receiver_wol_mac": "WOL MAC-Adresse",
+  "label.receiver_intertechno_family": "Intertechno Familie (A–D)",
+  "label.receiver_intertechno_device": "Intertechno Gerät (1–3)",
   "label.receiver_has_genre": "Genre-Daten verfügbar",
   "label.user_slug": "Kürzel (slug)",
   "label.user_name": "Anzeigename",

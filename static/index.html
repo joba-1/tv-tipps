@@ -285,6 +285,17 @@
           <label x-show="newReceiver.power_method === 'wol'"><span x-text="t('label.receiver_wol_mac')"></span>
             <input x-model="newReceiver.wol_mac" placeholder="00:11:22:33:44:55">
           </label>
+          <label x-show="newReceiver.power_method === 'intertechno'"><span x-text="t('label.receiver_intertechno_family')"></span>
+            <select x-model="newReceiver.intertechno_family">
+              <option value="">—</option>
+              <option>A</option><option>B</option><option>C</option><option>D</option>
+            </select>
+          </label>
+          <label x-show="newReceiver.power_method === 'intertechno'"><span x-text="t('label.receiver_intertechno_device')"></span>
+            <select x-model.number="newReceiver.intertechno_device">
+              <option value="1">1</option><option value="2">2</option><option value="3">3</option>
+            </select>
+          </label>
           <label><span x-text="t('label.receiver_has_genre')"></span>
             <input type="checkbox" role="switch" x-model="newReceiver.has_genre">
           </label>

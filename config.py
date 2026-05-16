@@ -12,7 +12,9 @@ class ReceiverConfig:
     has_genre: bool = False     # True if OWIF firmware provides genre strings
     wol_mac: str | None = None  # if set, WOL wake is supported
     power_method: str = "none"  # "wol" | "intertechno" | "none"
-    location: str = ""          # human-readable room name, e.g. "Wohnzimmer"
+    intertechno_family: str = ""  # RF family letter, e.g. "A"
+    intertechno_device: int = 1   # RF device number, e.g. 1
+    location: str = ""            # human-readable room name, e.g. "Wohnzimmer"
 
 
 @dataclass

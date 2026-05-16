@@ -17,6 +17,8 @@ class Receiver(Base):
     priority: Mapped[int] = mapped_column(Integer, nullable=False, default=99, server_default="99")
     power_method: Mapped[str] = mapped_column(String(16), nullable=False, default="none", server_default="none")
     wol_mac: Mapped[str | None] = mapped_column(String(32))
+    intertechno_family: Mapped[str] = mapped_column(String(4), nullable=False, default="", server_default="")
+    intertechno_device: Mapped[int] = mapped_column(Integer, nullable=False, default=1, server_default="1")
     has_genre: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="0")
     default_user: Mapped[str | None] = mapped_column(String(64))
     power_state: Mapped[str | None] = mapped_column(String(32))  # on|standby|deep_standby|unknown
