@@ -99,39 +99,31 @@
     <div x-show="loadingRecs" aria-busy="true" class="loading-center"
          x-text="t('msg.loading_tips')"></div>
 
-    <div class="rec-list" x-show="!loadingRecs">
+    <div class="event-list" x-show="!loadingRecs">
       <template x-for="(rec, idx) in (recsData && recsData.recommendations || [])"
                 :key="rec.sref + idx">
-        <article class="rec-card" :class="isLive(rec) ? 'live' : ''"
+        <article class="event-row" :class="isLive(rec) ? 'live' : ''"
                  @click="showDetail(rec, rec.channel_name)" role="button">
-          <header>
-            <div class="rec-rank" x-text="t('label.rank', { n: idx+1 })"></div>
-            <div class="rec-channel" x-text="rec.channel_name"></div>
-            <div class="rec-time"
+          <div class="event-meta">
+            <div class="event-time"
                  x-text="formatTime(rec.start_time) + ' – ' + formatTime(rec.end_time)"></div>
-          </header>
-          <div class="rec-title" x-text="rec.title"></div>
-          <div class="rec-meta">
-            <span class="rec-genre" x-show="rec.genre" x-text="tGenre(rec.genre)"></span>
-            <div class="rec-score-bar"
-                 :title="t('label.match', { pct: Math.round(rec.match_score*100) })">
-              <div class="rec-score-fill"
-                   :style="'width:' + (rec.match_score*100) + '%'"
-                   :class="rec.match_score >= 0.75 ? 'high' : rec.match_score >= 0.5 ? 'mid' : 'low'">
-              </div>
+            <div class="event-progress" x-show="isLive(rec)"
+                 :title="t('label.progress', { pct: Math.round(progressPct(rec)) })">
+              <div class="event-progress-fill"
+                   :style="'width:' + progressPct(rec) + '%'"></div>
             </div>
-            <span class="rec-score-label"
-                  x-text="t('label.match', { pct: Math.round(rec.match_score*100) })"></span>
+            <div class="event-channel" x-text="rec.channel_name"></div>
           </div>
-          <div class="rec-progress" x-show="rec.progress_pct > 0"
-               :title="t('label.progress', { pct: Math.round(rec.progress_pct) })">
-            <div class="rec-progress-bar">
-              <div class="rec-progress-fill" :style="'width:' + rec.progress_pct + '%'"></div>
+          <div class="event-content">
+            <div class="event-title-row">
+              <span class="event-title" x-text="rec.title"></span>
+              <span class="event-match"
+                    :class="rec.match_score >= 0.75 ? 'high' : rec.match_score >= 0.5 ? 'mid' : 'low'"
+                    x-text="t('label.match', { pct: Math.round(rec.match_score*100) })"></span>
             </div>
-            <span class="rec-progress-label"
-                  x-text="t('label.progress', { pct: Math.round(rec.progress_pct) })"></span>
+            <div class="event-desc" x-show="rec.short_desc" x-text="rec.short_desc"></div>
+            <div class="event-reason" x-show="rec.reason" x-text="rec.reason"></div>
           </div>
-          <div class="rec-reason" x-text="rec.reason"></div>
         </article>
       </template>
       <div x-show="(!recsData || !recsData.recommendations || recsData.recommendations.length===0)
@@ -155,31 +147,29 @@
     <div x-show="loadingNow" aria-busy="true" class="loading-center"
          x-text="t('msg.loading_epg')"></div>
 
-    <div class="channel-grid" x-show="!loadingNow">
-      <template x-for="ch in nowNext" :key="ch.channel_id">
-        <article class="channel-card" :class="ch.stale ? 'stale' : ''">
-          <header>
-            <img x-show="ch.picon_path" :src="piconUrl(ch.picon_path)" class="picon"
-                 @error="$el.style.display='none'" loading="lazy">
-            <strong x-text="ch.channel_name"></strong>
-          </header>
-
-          <div x-show="ch.now" @click="showDetail(ch.now, ch.channel_name, ch.sref)"
-               class="program now-program" role="button">
-            <div class="program-title" x-text="ch.now?.title"></div>
-            <div class="progress-bar">
-              <div class="progress-fill"
-                   :style="'width:' + (ch.now?.progress_pct || 0) + '%'"></div>
+    <div class="event-list" x-show="!loadingNow">
+      <template x-for="ev in nowNextFlat" :key="ev.sref + ':' + ev._kind + ':' + ev.id">
+        <article class="event-row" :class="isLive(ev) ? 'live' : ''"
+                 :data-end="ev.end_time"
+                 @click="showDetail(ev, ev.channel_name, ev.sref)" role="button">
+          <div class="event-meta">
+            <div class="event-time"
+                 x-text="formatTime(ev.start_time) + ' – ' + formatTime(ev.end_time)"></div>
+            <div class="event-progress" x-show="isLive(ev)"
+                 :title="t('label.progress', { pct: Math.round(progressPct(ev)) })">
+              <div class="event-progress-fill"
+                   :style="'width:' + progressPct(ev) + '%'"></div>
             </div>
-            <small x-text="formatTime(ch.now?.start_time) + ' – ' + formatTime(ch.now?.end_time)"></small>
+            <div class="event-channel" x-text="ev.channel_name"></div>
           </div>
-          <div x-show="!ch.now" class="no-data" x-text="t('msg.no_current')"></div>
-
-          <div x-show="ch.next" class="program next-program"
-               @click="showDetail(ch.next, ch.channel_name, ch.sref)" role="button">
-            <span class="next-label" x-text="t('label.next_prefix')"></span>
-            <span x-text="ch.next?.title"></span>
-            <small x-text="' · ' + formatTime(ch.next?.start_time)"></small>
+          <div class="event-content">
+            <div class="event-title-row">
+              <span class="event-title" x-text="ev.title"></span>
+              <span class="event-kind-badge" x-show="ev._kind === 'next'"
+                    x-text="t('label.next_prefix')"></span>
+            </div>
+            <div class="event-desc" x-show="ev.short_desc || ev.long_desc"
+                 x-text="ev.short_desc || ev.long_desc"></div>
           </div>
         </article>
       </template>
@@ -212,15 +202,27 @@
     <div x-show="loadingEpg" aria-busy="true" class="loading-center"
          x-text="t('msg.loading_epg')"></div>
 
-    <div x-show="!loadingEpg" class="epg-list">
+    <div x-show="!loadingEpg" class="event-list">
       <template x-for="ev in epgEvents" :key="ev.id">
-        <article class="epg-row" :class="isLive(ev) ? 'live' : ''"
+        <article class="event-row" :class="isLive(ev) ? 'live' : ''"
                  :data-end="ev.end_time" @click="showDetail(ev, ev.channel_name)" role="button">
-          <div class="epg-time"
-               x-text="formatTime(ev.start_time) + ' – ' + formatTime(ev.end_time)"></div>
-          <div class="epg-channel" x-text="ev.channel_name"></div>
-          <div class="epg-title"   x-text="ev.title"></div>
-          <div class="epg-desc"    x-text="ev.short_desc || ev.long_desc"></div>
+          <div class="event-meta">
+            <div class="event-time"
+                 x-text="formatTime(ev.start_time) + ' – ' + formatTime(ev.end_time)"></div>
+            <div class="event-progress" x-show="isLive(ev)"
+                 :title="t('label.progress', { pct: Math.round(progressPct(ev)) })">
+              <div class="event-progress-fill"
+                   :style="'width:' + progressPct(ev) + '%'"></div>
+            </div>
+            <div class="event-channel" x-text="ev.channel_name"></div>
+          </div>
+          <div class="event-content">
+            <div class="event-title-row">
+              <span class="event-title" x-text="ev.title"></span>
+            </div>
+            <div class="event-desc" x-show="ev.short_desc || ev.long_desc"
+                 x-text="ev.short_desc || ev.long_desc"></div>
+          </div>
         </article>
       </template>
       <div x-show="epgEvents.length === 0 && !loadingEpg && epgSearchQuery.trim().length >= 2"

@@ -34,7 +34,7 @@ function tvApp() {
     // EPG range
     epgEvents: [],
     loadingEpg: false,
-    epgContext: "tonight",
+    epgContext: "2h",
     epgSearchQuery: "",
     _epgSearchTimer: null,
 
@@ -299,7 +299,7 @@ function tvApp() {
 
     _epgScrollToNow() {
       const now = new Date().toISOString();
-      const rows = document.querySelectorAll(".epg-row[data-end]");
+      const rows = document.querySelectorAll(".event-row[data-end]");
       for (const row of rows) {
         if (row.dataset.end > now) {
           row.scrollIntoView({ block: "start" });
@@ -659,6 +659,30 @@ function tvApp() {
       if (!start || !end) return false;
       const now = Date.now();
       return start.getTime() <= now && now < end.getTime();
+    },
+
+    progressPct(event) {
+      if (!event) return 0;
+      if (typeof event.progress_pct === "number" && event.progress_pct > 0) return event.progress_pct;
+      const start = this._parseEventTime(event.start_time);
+      const end   = this._parseEventTime(event.end_time);
+      if (!start || !end) return 0;
+      const now = Date.now();
+      const s = start.getTime(), e = end.getTime();
+      if (now <= s || e <= s) return 0;
+      if (now >= e) return 100;
+      return ((now - s) / (e - s)) * 100;
+    },
+
+    get nowNextFlat() {
+      const out = [];
+      for (const ch of this.nowNext) {
+        const channel_name = ch.channel_name;
+        const sref = ch.sref;
+        if (ch.now)  out.push({ ...ch.now,  channel_name, sref, _kind: "now"  });
+        if (ch.next) out.push({ ...ch.next, channel_name, sref, _kind: "next" });
+      }
+      return out;
     },
 
     showDetail(event, channelName, sref = null) {
