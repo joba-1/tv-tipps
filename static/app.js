@@ -72,6 +72,7 @@ function tvApp() {
     modalEvent: null,
     modalChannel: "",
     modalSref: "",
+    modalIsLive: false,
 
     // ── i18n helpers ────────────────────────────────────────────────────────
 
@@ -654,6 +655,10 @@ function tvApp() {
       this.modalEvent = event;
       this.modalChannel = channelName;
       this.modalSref = sref || event?.sref || "";
+      const now = Date.now();
+      const start = event?.start_time ? new Date(event.start_time + "Z").getTime() : null;
+      const end   = event?.end_time   ? new Date(event.end_time   + "Z").getTime() : null;
+      this.modalIsLive = (event?.progress_pct > 0) || !!(start && end && start <= now && now < end);
       this.modalOpen = true;
     },
 

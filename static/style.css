@@ -295,11 +295,11 @@ nav details ul a {
 }
 .epg-row:hover { background: var(--pico-card-sectioning-background-color); }
 .epg-row-now {
-  background: rgba(82, 183, 136, 0.1);
-  border-left: 3px solid #52b788;
-  padding-left: calc(0.75rem - 3px);
+  background: rgba(82, 183, 136, 0.22);
+  border-left: 4px solid #52b788;
+  padding-left: calc(0.75rem - 4px);
 }
-.epg-row-now:hover { background: rgba(82, 183, 136, 0.18); }
+.epg-row-now:hover { background: rgba(82, 183, 136, 0.32); }
 
 .epg-time    { grid-column: 1; grid-row: 1; font-size: 0.75rem; color: var(--pico-muted-color); white-space: nowrap; align-self: baseline; }
 .epg-channel { grid-column: 1; grid-row: 2; font-size: 0.75rem; font-weight: 600; color: var(--pico-primary); white-space: nowrap; align-self: baseline; }

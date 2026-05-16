@@ -107,7 +107,7 @@
             <div class="rec-rank" x-text="t('label.rank', { n: idx+1 })"></div>
             <div class="rec-channel" x-text="rec.channel_name"></div>
             <div class="rec-time"
-                 x-text="rec.start_time.slice(11,16) + ' – ' + rec.end_time.slice(11,16)"></div>
+                 x-text="formatTime(rec.start_time) + ' – ' + formatTime(rec.end_time)"></div>
           </header>
           <div class="rec-title" x-text="rec.title"></div>
           <div class="rec-meta">
@@ -442,7 +442,7 @@
         <button :class="dislikedIds.has(modalEvent?.id) ? 'dislike-btn disliked' : 'dislike-btn outline'"
                 @click="toggleDislike(modalEvent?.id)"
                 x-text="dislikedIds.has(modalEvent?.id) ? t('btn.undislike') : t('btn.dislike')"></button>
-        <button x-show="modalSref" class="watch-btn" @click="watchChannel(modalSref); modalOpen=false"
+        <button x-show="modalSref && modalIsLive" class="watch-btn" @click="watchChannel(modalSref); modalOpen=false"
                 x-text="t('btn.watch')"></button>
       </footer>
     </article>
