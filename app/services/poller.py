@@ -224,30 +224,41 @@ async def _refresh_all_epg(full: bool = False) -> None:
         log.error("epg.refresh_error", error=str(e))
     finally:
         db.close()
-    # Warm the 'now' recommendation cache so users don't wait for the LLM.
-    try:
-        await _warm_recommendation_cache()
-    except Exception as e:
-        log.warning("recs.warm_after_epg_failed", error=str(e))
+    # Warm recommendation cache in background — must NOT block EPG refresh or
+    # startup; each LLM call takes seconds and we warm all contexts × users.
+    asyncio.create_task(_warm_recommendation_cache())
+
+
+_warming = False
+_WARM_CONTEXTS = ("now", "next", "prime", "today")
 
 
 async def _warm_recommendation_cache() -> None:
-    """Pre-generate 'now' recommendations for every user so users hit a warm cache.
-    LLM calls happen on this background path, not on the user's first request after
-    cache expiry. Failures are logged and don't block other users."""
-    from app.models import User
-    from app.services.recommendations import get_recommendations
-    db = SessionLocal()
+    """Pre-generate recommendations for every user × every context. LLM cost
+    happens on this background path so user requests hit a warm cache. Calls
+    are serial (Ollama is single-threaded); overlapping invocations are skipped."""
+    global _warming
+    if _warming:
+        log.info("recs.warm_skip_already_running")
+        return
+    _warming = True
     try:
-        users = db.query(User).all()
-        for u in users:
-            try:
-                await get_recommendations(u.id, u.name, "now", db, force_refresh=True)
-                log.info("recs.warmed", user=u.slug, context="now")
-            except Exception as e:
-                log.warning("recs.warm_failed", user=u.slug, context="now", error=str(e))
+        from app.models import User
+        from app.services.recommendations import get_recommendations
+        db = SessionLocal()
+        try:
+            users = db.query(User).all()
+            for u in users:
+                for ctx in _WARM_CONTEXTS:
+                    try:
+                        await get_recommendations(u.id, u.name, ctx, db, force_refresh=True)
+                        log.info("recs.warmed", user=u.slug, context=ctx)
+                    except Exception as e:
+                        log.warning("recs.warm_failed", user=u.slug, context=ctx, error=str(e))
+        finally:
+            db.close()
     finally:
-        db.close()
+        _warming = False
 
 
 async def _refresh_all_channels() -> None:
