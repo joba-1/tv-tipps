@@ -49,9 +49,11 @@ def epg_range(
 
     channels = get_channels_for_user(user_id, db)
     channel_ids = [c.id for c in channels]
-    # hours context: show only upcoming shows; tonight uses overlap (currently-airing stays visible)
-    future_only = hours is not None
-    return get_epg_range(channel_ids, start_dt, end_dt, db, future_only=future_only)
+    # Clamp start to now so already-ended events are never returned
+    now = utcnow()
+    if start_dt < now:
+        start_dt = now
+    return get_epg_range(channel_ids, start_dt, end_dt, db, future_only=False)
 
 
 @router.get("/api/epg/search", response_model=list[EpgRangeItem])
