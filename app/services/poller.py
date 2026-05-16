@@ -224,6 +224,30 @@ async def _refresh_all_epg(full: bool = False) -> None:
         log.error("epg.refresh_error", error=str(e))
     finally:
         db.close()
+    # Warm the 'now' recommendation cache so users don't wait for the LLM.
+    try:
+        await _warm_recommendation_cache()
+    except Exception as e:
+        log.warning("recs.warm_after_epg_failed", error=str(e))
+
+
+async def _warm_recommendation_cache() -> None:
+    """Pre-generate 'now' recommendations for every user so users hit a warm cache.
+    LLM calls happen on this background path, not on the user's first request after
+    cache expiry. Failures are logged and don't block other users."""
+    from app.models import User
+    from app.services.recommendations import get_recommendations
+    db = SessionLocal()
+    try:
+        users = db.query(User).all()
+        for u in users:
+            try:
+                await get_recommendations(u.id, u.name, "now", db, force_refresh=True)
+                log.info("recs.warmed", user=u.slug, context="now")
+            except Exception as e:
+                log.warning("recs.warm_failed", user=u.slug, context="now", error=str(e))
+    finally:
+        db.close()
 
 
 async def _refresh_all_channels() -> None:

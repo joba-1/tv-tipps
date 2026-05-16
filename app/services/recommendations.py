@@ -3,7 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import re
-from datetime import timedelta
+from datetime import datetime, timedelta
 from sqlalchemy.orm import Session
 from app.models import EpgEvent, Channel, RecommendationCache, ViewingSession, UserLike
 from app.services.profile import get_profile
@@ -25,7 +25,7 @@ _MAJOR_CHANNELS = {
     "ard", "zdf", "pro7", "prosieben", "sat.1", "rtl", "arte", "3sat",
     "kabel eins", "kabel1", "vox", "rtl2", "rtl zwei",
 }
-_CACHE_TTL = {"now": 30, "next": 30, "prime": 120, "today": 360}
+_CACHE_TTL = {"now": 90, "next": 90, "prime": 120, "today": 360}
 
 
 def _progress_pct(ev: EpgEvent, now) -> float:
@@ -36,6 +36,55 @@ def _progress_pct(ev: EpgEvent, now) -> float:
     if elapsed <= 0:
         return 0.0
     return round(min(100.0, elapsed / ev.duration_sec * 100), 1)
+
+
+# How much a fully-played show is penalised vs a fresh one (subtracted from match_score).
+_PROGRESS_PENALTY = 0.4
+# Drop items with less than this much time remaining when serving "now" recs.
+_NOW_MIN_REMAINING_SEC = 600  # 10 min
+
+
+def _realtime_adjust_now(result: dict) -> dict:
+    """For 'now' recs served from cache: recompute progress, drop near-ended items,
+    apply freshness penalty, re-sort. Lets us pre-warm the LLM cache and serve
+    accurate progress without re-asking the model as shows tick on."""
+    if result.get("context") != "now":
+        return result
+    items = result.get("recommendations") or []
+    if not items:
+        return result
+
+    from app.timezones import utcnow as _utcnow
+    now = _utcnow()
+    adjusted = []
+    for item in items:
+        st = item.get("start_time"); et = item.get("end_time")
+        if not st or not et:
+            continue
+        try:
+            start = datetime.fromisoformat(st)
+            end   = datetime.fromisoformat(et)
+        except ValueError:
+            continue
+        remaining = (end - now).total_seconds()
+        if remaining < _NOW_MIN_REMAINING_SEC:
+            continue
+        duration = (end - start).total_seconds()
+        if duration > 0:
+            elapsed = max(0.0, (now - start).total_seconds())
+            progress = min(100.0, elapsed / duration * 100)
+        else:
+            progress = 0.0
+        # Match-score is the cached LLM/rule rank; apply freshness penalty on top.
+        base = item.get("match_score", 0.5)
+        adj_score = max(0.0, base - (progress / 100) * _PROGRESS_PENALTY)
+        adjusted.append({
+            **item,
+            "progress_pct": round(progress, 1),
+            "match_score": round(adj_score, 2),
+        })
+    adjusted.sort(key=lambda x: -x.get("match_score", 0))
+    return {**result, "recommendations": adjusted}
 
 
 def _cache_key(user_id: int, context: str) -> str:
@@ -90,8 +139,9 @@ def rule_based_rank(candidates: list[EpgEvent], context: str, db: Session) -> li
             score += 0.2
 
         progress = _progress_pct(ev, now)
-        # Penalty for shows already mostly done — only 10% left is less useful than catching 90%.
-        score -= (progress / 100) * 0.4
+        # Progress penalty is NOT applied here — it is re-applied in _realtime_adjust_now()
+        # against the freshly computed progress_pct, so cached results stay accurate as
+        # shows age without re-running the LLM.
 
         scored.append((score, progress, ev, ch))
 
@@ -322,24 +372,28 @@ def _save_cache(user_id: int, context: str, result: dict, ttl_min: int, db: Sess
     db.commit()
 
 
-async def get_recommendations(user_id: int, user_name: str, context: str, db: Session) -> dict:
+async def get_recommendations(
+    user_id: int, user_name: str, context: str, db: Session,
+    force_refresh: bool = False,
+) -> dict:
     now = utcnow()
     key = _cache_key(user_id, context)
 
-    cached = (
-        db.query(RecommendationCache)
-        .filter(
-            RecommendationCache.user_id == user_id,
-            RecommendationCache.prompt_hash == key,
-            RecommendationCache.valid_until > now,
+    if not force_refresh:
+        cached = (
+            db.query(RecommendationCache)
+            .filter(
+                RecommendationCache.user_id == user_id,
+                RecommendationCache.prompt_hash == key,
+                RecommendationCache.valid_until > now,
+            )
+            .order_by(RecommendationCache.generated_at.desc())
+            .first()
         )
-        .order_by(RecommendationCache.generated_at.desc())
-        .first()
-    )
-    if cached:
-        data = json.loads(cached.response)
-        data["cached"] = True
-        return data
+        if cached:
+            data = json.loads(cached.response)
+            data["cached"] = True
+            return _realtime_adjust_now(data)
 
     channel_ids = [c.id for c in get_channels_for_user(user_id, db)]
     candidates = _epg_candidates(context, channel_ids, db)
@@ -384,4 +438,4 @@ async def get_recommendations(user_id: int, user_name: str, context: str, db: Se
         }
 
     _save_cache(user_id, context, result, _CACHE_TTL.get(context, 30), db)
-    return result
+    return _realtime_adjust_now(result)
