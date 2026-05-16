@@ -205,12 +205,16 @@
 
     <div x-show="!loadingEpg" class="epg-list">
       <template x-for="ev in epgEvents" :key="ev.id">
-        <article class="epg-row" :data-end="ev.end_time" @click="showDetail(ev, ev.channel_name)" role="button">
+        <article class="epg-row" :class="ev.progress_pct > 0 ? 'epg-row-now' : ''"
+                 :data-end="ev.end_time" @click="showDetail(ev, ev.channel_name)" role="button">
           <div class="epg-time"
                x-text="formatTime(ev.start_time) + ' – ' + formatTime(ev.end_time)"></div>
           <div class="epg-channel" x-text="ev.channel_name"></div>
           <div class="epg-title"   x-text="ev.title"></div>
           <div class="epg-desc"    x-text="ev.short_desc || ev.long_desc"></div>
+          <button x-show="ev.progress_pct > 0" class="watch-btn epg-watch-btn"
+                  @click.stop="watchChannel(ev.sref)"
+                  x-text="t('btn.watch')"></button>
         </article>
       </template>
       <div x-show="epgEvents.length === 0 && !loadingEpg && epgSearchQuery.trim().length >= 2"

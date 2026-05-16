@@ -284,22 +284,29 @@ nav details ul a {
 
 .epg-row {
   display: grid;
-  grid-template-columns: max-content 1fr;
+  grid-template-columns: max-content 1fr auto;
   grid-template-rows: auto auto;
   column-gap: 0.75rem;
   row-gap: 0;
-  align-items: baseline;
+  align-items: center;
   padding: 0.4rem 0.75rem;
   cursor: pointer;
   margin: 0;
 }
 .epg-row:hover { background: var(--pico-card-sectioning-background-color); }
+.epg-row-now {
+  background: rgba(82, 183, 136, 0.1);
+  border-left: 3px solid #52b788;
+  padding-left: calc(0.75rem - 3px);
+}
+.epg-row-now:hover { background: rgba(82, 183, 136, 0.18); }
 
-.epg-time    { grid-column: 1; grid-row: 1; font-size: 0.75rem; color: var(--pico-muted-color); white-space: nowrap; }
-.epg-channel { grid-column: 1; grid-row: 2; font-size: 0.75rem; font-weight: 600; color: var(--pico-primary); white-space: nowrap; }
-.epg-title   { grid-column: 2; grid-row: 1; font-weight: 500; }
-.epg-desc    { grid-column: 2; grid-row: 2; font-size: 0.78rem; color: var(--pico-muted-color); white-space: pre-line; }
+.epg-time    { grid-column: 1; grid-row: 1; font-size: 0.75rem; color: var(--pico-muted-color); white-space: nowrap; align-self: baseline; }
+.epg-channel { grid-column: 1; grid-row: 2; font-size: 0.75rem; font-weight: 600; color: var(--pico-primary); white-space: nowrap; align-self: baseline; }
+.epg-title   { grid-column: 2; grid-row: 1; font-weight: 500; align-self: baseline; }
+.epg-desc    { grid-column: 2; grid-row: 2; font-size: 0.78rem; color: var(--pico-muted-color); white-space: pre-line; align-self: baseline; }
 .epg-text    { white-space: pre-line; }
+.epg-watch-btn { grid-column: 3; grid-row: 1 / span 2; align-self: center; }
 
 /* ---- Admin page ---- */
 .admin-receivers {
