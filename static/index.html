@@ -113,13 +113,13 @@
                    :style="'width:' + progressPct(rec) + '%'"></div>
             </div>
             <div class="event-channel" x-text="rec.channel_name"></div>
+            <span class="event-match"
+                  :class="rec.match_score >= 0.75 ? 'high' : rec.match_score >= 0.5 ? 'mid' : 'low'"
+                  x-text="t('label.match', { pct: Math.round(rec.match_score*100) })"></span>
           </div>
           <div class="event-content">
             <div class="event-title-row">
               <span class="event-title" x-text="rec.title"></span>
-              <span class="event-match"
-                    :class="rec.match_score >= 0.75 ? 'high' : rec.match_score >= 0.5 ? 'mid' : 'low'"
-                    x-text="t('label.match', { pct: Math.round(rec.match_score*100) })"></span>
             </div>
             <div class="event-desc" x-show="rec.short_desc" x-text="rec.short_desc"></div>
             <div class="event-reason" x-show="rec.reason" x-text="rec.reason"></div>
