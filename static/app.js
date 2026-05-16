@@ -139,6 +139,12 @@ function tvApp() {
 
       await this.loadLikes();
 
+      if (this.receivers.length === 0 || this.users.length === 0) {
+        if (!window.location.hash || window.location.hash === "#" || window.location.hash === "#recs") {
+          window.location.hash = "#admin";
+        }
+      }
+
       route();
 
       setInterval(() => this.loadReceivers(), 30_000);
