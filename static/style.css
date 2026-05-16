@@ -243,6 +243,22 @@ nav details ul a {
   color: #fff;
 }
 .record-btn:hover { background: #a93226; border-color: #a93226; }
+/* Remove-timer reuses the layout but a darker / outline look to signal cancel */
+.remove-timer-btn {
+  background: transparent;
+  border-color: #c0392b;
+  color: #ff8a7e;
+}
+.remove-timer-btn:hover { background: rgba(192, 57, 43, 0.18); }
+
+/* Pill badge shown on event rows that have an active recording timer */
+.event-timer-badge {
+  display: inline-block;
+  align-self: flex-start;
+  font-size: 0.85rem;
+  line-height: 1;
+  color: #ff8a7e;
+}
 
 /* Toast notification */
 .toast {

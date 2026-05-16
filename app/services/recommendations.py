@@ -184,6 +184,7 @@ def rule_based_rank(candidates: list[EpgEvent], context: str, db: Session) -> li
     return [
         {
             "id": ev.id,
+            "event_id": ev.event_id,
             "sref": ch.sref,
             "channel_name": ch.name,
             "title": ev.title,
@@ -534,6 +535,7 @@ async def _try_ollama_single_batch(
         score = (len(indices) - len(items)) / max(1, len(indices))
         items.append({
             "id": ev.id,
+            "event_id": ev.event_id,
             "sref": ch.sref,
             "channel_name": ch.name,
             "title": ev.title,

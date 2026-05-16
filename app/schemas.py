@@ -28,6 +28,7 @@ class NowNextOut(BaseModel):
 
 class EpgRangeItem(BaseModel):
     id: int
+    event_id: int | None = None
     channel_id: int
     channel_name: str
     sref: str
@@ -62,6 +63,7 @@ class AdminStatus(BaseModel):
 
 class RecommendationItem(BaseModel):
     sref: str | None = None
+    event_id: int | None = None
     channel_name: str | None = None
     title: str
     short_desc: str | None = None

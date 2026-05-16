@@ -13,6 +13,7 @@
 
   "btn.watch": "▶ Watch",
   "btn.record": "⏺ Aufnahme",
+  "btn.remove_timer": "⏹ Aufnahme entfernen",
   "btn.refresh": "↺",
   "btn.wake": "⚡ Wake",
   "btn.sleep": "💤 Sleep",
@@ -34,6 +35,9 @@
   "msg.zap_fail": "⚠️ Zap fehlgeschlagen",
   "msg.record_ok": "⏺ Aufnahme programmiert auf {receiver}",
   "msg.record_fail": "⚠️ Aufnahme fehlgeschlagen",
+  "msg.timer_removed": "⏹ Timer auf {receiver} entfernt",
+  "msg.timer_remove_fail": "⚠️ Timer konnte nicht entfernt werden",
+  "label.timer_set": "Aufnahme programmiert",
   "msg.connect_error": "⚠️ Verbindungsfehler",
   "msg.refresh_ok": "✓ {target} aktualisiert",
   "msg.refresh_error": "⚠️ Fehler",

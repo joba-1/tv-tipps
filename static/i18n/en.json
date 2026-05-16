@@ -13,6 +13,7 @@
 
   "btn.watch": "▶ Watch",
   "btn.record": "⏺ Record",
+  "btn.remove_timer": "⏹ Remove timer",
   "btn.refresh": "↺",
   "btn.wake": "⚡ Wake",
   "btn.sleep": "💤 Sleep",
@@ -34,6 +35,9 @@
   "msg.zap_fail": "⚠️ Zap failed",
   "msg.record_ok": "⏺ Recording timer set on {receiver}",
   "msg.record_fail": "⚠️ Could not set recording timer",
+  "msg.timer_removed": "⏹ Timer on {receiver} removed",
+  "msg.timer_remove_fail": "⚠️ Could not remove timer",
+  "label.timer_set": "Recording scheduled",
   "msg.connect_error": "⚠️ Connection error",
   "msg.refresh_ok": "✓ {target} refreshed",
   "msg.refresh_error": "⚠️ Error",

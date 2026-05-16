@@ -121,6 +121,7 @@
             <span class="event-match"
                   :class="rec.match_score >= 0.75 ? 'high' : rec.match_score >= 0.5 ? 'mid' : 'low'"
                   x-text="t('label.match', { pct: Math.round(rec.match_score*100) })"></span>
+            <span class="event-timer-badge" x-show="findTimer(rec)" :title="t('label.timer_set')">⏺</span>
           </div>
           <div class="event-content">
             <div class="event-title-row">
@@ -169,6 +170,7 @@
             <span class="event-match" x-show="recsMatch(ev.id) !== undefined"
                   :class="recsMatch(ev.id) >= 0.75 ? 'high' : recsMatch(ev.id) >= 0.5 ? 'mid' : 'low'"
                   x-text="t('label.match', { pct: Math.round((recsMatch(ev.id) || 0) * 100) })"></span>
+            <span class="event-timer-badge" x-show="findTimer(ev)" :title="t('label.timer_set')">⏺</span>
           </div>
           <div class="event-content">
             <div class="event-title-row">
@@ -226,6 +228,7 @@
             <span class="event-match" x-show="recsMatch(ev.id) !== undefined"
                   :class="recsMatch(ev.id) >= 0.75 ? 'high' : recsMatch(ev.id) >= 0.5 ? 'mid' : 'low'"
                   x-text="t('label.match', { pct: Math.round((recsMatch(ev.id) || 0) * 100) })"></span>
+            <span class="event-timer-badge" x-show="findTimer(ev)" :title="t('label.timer_set')">⏺</span>
           </div>
           <div class="event-content">
             <div class="event-title-row">
@@ -463,8 +466,10 @@
                 x-text="dislikedIds.has(modalEvent?.id) ? t('btn.undislike') : t('btn.dislike')"></button>
         <button x-show="modalSref && modalIsLive" class="watch-btn" @click="watchChannel(modalSref); modalOpen=false"
                 x-text="t('btn.watch')"></button>
-        <button x-show="canRecord()" class="record-btn" @click="recordEvent(); modalOpen=false"
-                x-text="t('btn.record')"></button>
+        <button x-show="canRecord() && !findTimer(modalEvent)" class="record-btn"
+                @click="recordEvent(); modalOpen=false" x-text="t('btn.record')"></button>
+        <button x-show="findTimer(modalEvent)" class="record-btn remove-timer-btn"
+                @click="removeTimer(); modalOpen=false" x-text="t('btn.remove_timer')"></button>
       </footer>
     </article>
   </dialog>

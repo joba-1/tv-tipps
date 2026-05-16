@@ -30,6 +30,11 @@ function tvApp() {
     // picked that event in some Tips view.
     recsMap: {},
 
+    // Active recording timers indexed for fast lookup against an EPG event.
+    // Keys: "eit:<event_id>" and "sref:<sref>:<rounded5min>" (covers ±2 min padding).
+    // Value: the raw timer entry from OWIF — used to delete via (sref, begin, end).
+    timersMap: {},
+
     // Now & Next
     nowNext: [],
     loadingNow: false,
@@ -134,9 +139,9 @@ function tvApp() {
         this.page = hash || "recs";
         if (prevPage === "remote" && this.page !== "remote") this._stopScreenshotPoll();
         if (prevPage === "recs"   && this.page !== "recs")   this._cancelFastRecsPoll();
-        if (this.page === "epg")    { this.loadEpg();     this.loadRecsMap(); }
-        if (this.page === "now")    { this.loadNowNext(); this.loadRecsMap(); }
-        if (this.page === "recs")   this.loadRecs();
+        if (this.page === "epg")    { this.loadEpg();     this.loadRecsMap(); this.loadTimers(); }
+        if (this.page === "now")    { this.loadNowNext(); this.loadRecsMap(); this.loadTimers(); }
+        if (this.page === "recs")   { this.loadRecs();    this.loadTimers(); }
         if (this.page === "admin")  this.loadAdminStatus();
         if (this.page === "remote") this._startScreenshotPoll();
       };
@@ -168,6 +173,7 @@ function tvApp() {
         if (this.page === "recs") this.loadRecs();
         if (this.page === "now")  { this.loadNowNext(); this.loadRecsMap(); }
         if (this.page === "epg")  this.loadRecsMap();
+        if (this.page === "epg" || this.page === "now" || this.page === "recs") this.loadTimers();
       }, 120_000);
     },
 
@@ -276,6 +282,81 @@ function tvApp() {
       return this.recsMap[eventId];  // undefined → no badge
     },
 
+    async loadTimers() {
+      try {
+        const recv = this.selectedReceiver
+          ? `?receiver=${encodeURIComponent(this.selectedReceiver.name)}`
+          : "";
+        const res = await fetch(`/api/remote/timers${recv}`, { credentials: "include" });
+        if (!res.ok) return;
+        const data = await res.json();
+        const map = {};
+        for (const t of (data.timers || [])) {
+          // Skip cancelled/disabled timers
+          if (t.disabled) continue;
+          if (t.eit) map[`eit:${t.eit}`] = t;
+          if (t.serviceref && typeof t.begin === "number") {
+            // Round begin to nearest 5-min slot — handles our 2 min pre-padding
+            // plus minor broadcaster slip without inventing duplicate keys.
+            const rounded = Math.round(t.begin / 300) * 300;
+            map[`sref:${t.serviceref}:${rounded}`] = t;
+          }
+        }
+        this.timersMap = map;
+      } catch (_) {}
+    },
+
+    findTimer(ev) {
+      if (!ev) return null;
+      // Prefer eit match — cheapest and most reliable.
+      if (ev.event_id != null) {
+        const byEit = this.timersMap[`eit:${ev.event_id}`];
+        if (byEit) return byEit;
+      }
+      // Fallback: serviceref + start_time, allowing for the 2-min pre-padding.
+      const start = this._parseEventTime(ev.start_time);
+      if (!start || !ev.sref) return null;
+      const startSec = Math.floor(start.getTime() / 1000);
+      for (const delta of [-120, 0, 120]) {
+        const rounded = Math.round((startSec - 120 + delta) / 300) * 300;
+        const hit = this.timersMap[`sref:${ev.sref}:${rounded}`];
+        if (hit) return hit;
+      }
+      return null;
+    },
+
+    async removeTimer() {
+      const t = this.findTimer(this.modalEvent);
+      if (!t) return;
+      try {
+        const body = {
+          sref: t.serviceref,
+          begin: t.begin,
+          end: t.end,
+        };
+        if (this.selectedReceiver) body.receiver = this.selectedReceiver.name;
+        const res = await fetch("/api/remote/timer/remove", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+        });
+        const data = await res.json();
+        if (data.ok) {
+          this._toast(this.t("msg.timer_removed",
+            { receiver: data.receiver_location || data.receiver_name }));
+          // Optimistic local update so the badge disappears right away.
+          this.timersMap = Object.fromEntries(
+            Object.entries(this.timersMap).filter(([, v]) =>
+              !(v.serviceref === t.serviceref && v.begin === t.begin && v.end === t.end))
+          );
+        } else {
+          this._toast(this.t("msg.timer_remove_fail"));
+        }
+      } catch (_) {
+        this._toast(this.t("msg.connect_error"));
+      }
+    },
+
     setRecsContext(ctx) {
       this.recsContext = ctx;
       this.recsData = null;
@@ -309,6 +390,8 @@ function tvApp() {
         if (data.ok) {
           this._toast(this.t("msg.record_ok",
             { receiver: data.receiver_location || data.receiver_name }));
+          // Re-fetch the timer list so the badge shows up right away.
+          this.loadTimers();
         } else {
           this._toast(this.t("msg.record_fail"));
         }
@@ -724,6 +807,7 @@ function tvApp() {
       this.recsData = null;
       this.recsMap = {};
       await this.loadLikes();
+      // Timers are receiver-wide, not user-specific, so we don't reset timersMap.
       if (this.page === "recs") await this.loadRecs();
       if (this.page === "now")  { await this.loadNowNext(); this.loadRecsMap(); }
       if (this.page === "epg")  { await this.loadEpg();     this.loadRecsMap(); }

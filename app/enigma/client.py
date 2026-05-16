@@ -109,6 +109,19 @@ class EnigmaClient:
         data = await self._get("/api/zap", params={"sRef": sref})
         return bool(data and data.get("result"))
 
+    async def list_timers(self) -> list[dict]:
+        """Return active timer entries from /api/timerlist."""
+        data = await self._get("/api/timerlist")
+        if not data:
+            return []
+        return data.get("timers", []) or []
+
+    async def delete_timer(self, sref: str, begin: int, end: int) -> bool:
+        """Cancel a timer matching sref+begin+end (exact epoch seconds)."""
+        params = {"sRef": sref, "begin": str(begin), "end": str(end)}
+        data = await self._get("/api/timerdelete", params=params)
+        return bool(data and data.get("result"))
+
     async def add_timer(
         self, sref: str, begin: int, end: int, name: str,
         description: str = "", justplay: int = 0,

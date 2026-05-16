@@ -30,6 +30,13 @@ class TimerRequest(BaseModel):
     receiver: str | None = None
 
 
+class TimerRemoveRequest(BaseModel):
+    sref: str
+    begin: int        # epoch seconds — must match the timer's begin exactly
+    end: int          # epoch seconds — must match the timer's end exactly
+    receiver: str | None = None
+
+
 async def _find_receiver(preferred_name: str | None):
     """Return (rcfg, client) for the requested receiver.
 
@@ -100,6 +107,35 @@ async def send_key(req: KeyRequest):
     ok = await client.send_key(req.key)
     log.info("remote.key", receiver=rcfg.name, key=req.key, ok=ok)
     return {"ok": ok, "receiver_name": rcfg.name}
+
+
+@router.get("/api/remote/timers")
+async def list_timers(receiver: str | None = None):
+    """Return active recording timers from the receiver. Empty list if offline."""
+    rcfg, client = await _find_receiver(receiver)
+    if rcfg is None or client is None:
+        return {"timers": [], "receiver_name": None}
+    if not await client.is_online():
+        return {"timers": [], "receiver_name": rcfg.name}
+    timers = await client.list_timers()
+    return {"timers": timers, "receiver_name": rcfg.name}
+
+
+@router.post("/api/remote/timer/remove")
+async def remove_timer(req: TimerRemoveRequest):
+    rcfg, client = await _find_receiver(req.receiver)
+    if rcfg is None or client is None:
+        raise HTTPException(503, "No receiver available")
+    if not await client.is_online():
+        raise HTTPException(503, f"{rcfg.name} is offline — wake it first")
+    ok = await client.delete_timer(req.sref, req.begin, req.end)
+    log.info("remote.timer_remove", receiver=rcfg.name, sref=req.sref,
+             begin=req.begin, end=req.end, ok=ok)
+    return {
+        "ok": ok,
+        "receiver_name": rcfg.name,
+        "receiver_location": rcfg.location or rcfg.name,
+    }
 
 
 @router.post("/api/remote/record")
