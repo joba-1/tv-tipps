@@ -822,6 +822,9 @@ function tvApp() {
         if (this.selectedReceiver)
           document.cookie = `tv_tips_receiver=${name}; path=/; max-age=31536000; SameSite=Lax`;
       }
+      // Timers are per-receiver — refresh so badges reflect the new target.
+      this.timersMap = {};
+      this.loadTimers();
     },
 
     // ── Helpers ──────────────────────────────────────────────────────────────
