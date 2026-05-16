@@ -271,21 +271,21 @@
       <details class="admin-add-form">
         <summary x-text="t('label.add_receiver')"></summary>
         <div class="admin-add-fields">
-          <label x-text="t('label.receiver_name')"><input x-model="newReceiver.name" placeholder="box1"></label>
-          <label x-text="t('label.receiver_ip')"><input x-model="newReceiver.ip" placeholder="192.168.1.15"></label>
-          <label x-text="t('label.receiver_location')"><input x-model="newReceiver.location" placeholder="Wohnzimmer"></label>
-          <label x-text="t('label.receiver_priority')"><input type="number" x-model.number="newReceiver.priority" min="1" max="99"></label>
-          <label x-text="t('label.receiver_power_method')">
+          <label><span x-text="t('label.receiver_name')"></span><input x-model="newReceiver.name" placeholder="box1"></label>
+          <label><span x-text="t('label.receiver_ip')"></span><input x-model="newReceiver.ip" placeholder="192.168.1.15"></label>
+          <label><span x-text="t('label.receiver_location')"></span><input x-model="newReceiver.location" placeholder="Wohnzimmer"></label>
+          <label><span x-text="t('label.receiver_priority')"></span><input type="number" x-model.number="newReceiver.priority" min="1" max="99"></label>
+          <label><span x-text="t('label.receiver_power_method')"></span>
             <select x-model="newReceiver.power_method">
               <option value="none">none</option>
               <option value="wol">wol</option>
               <option value="intertechno">intertechno</option>
             </select>
           </label>
-          <label x-show="newReceiver.power_method === 'wol'" x-text="t('label.receiver_wol_mac')">
+          <label x-show="newReceiver.power_method === 'wol'"><span x-text="t('label.receiver_wol_mac')"></span>
             <input x-model="newReceiver.wol_mac" placeholder="00:11:22:33:44:55">
           </label>
-          <label x-text="t('label.receiver_has_genre')">
+          <label><span x-text="t('label.receiver_has_genre')"></span>
             <input type="checkbox" role="switch" x-model="newReceiver.has_genre">
           </label>
           <button @click="addReceiver()" :disabled="!newReceiver.name || !newReceiver.ip"
@@ -310,8 +310,8 @@
       <details class="admin-add-form">
         <summary x-text="t('label.add_user')"></summary>
         <div class="admin-add-fields">
-          <label x-text="t('label.user_slug')"><input x-model="newUser.slug" placeholder="alice"></label>
-          <label x-text="t('label.user_name')"><input x-model="newUser.name" placeholder="Alice"></label>
+          <label><span x-text="t('label.user_slug')"></span><input x-model="newUser.slug" placeholder="alice"></label>
+          <label><span x-text="t('label.user_name')"></span><input x-model="newUser.name" placeholder="Alice"></label>
           <button @click="addUser()" :disabled="!newUser.slug || !newUser.name"
                   x-text="t('btn.add')"></button>
         </div>
