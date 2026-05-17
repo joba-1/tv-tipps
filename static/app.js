@@ -871,6 +871,18 @@ function tvApp() {
       return out;
     },
 
+    displayChannel(name) {
+      if (!name) return "";
+      let s = name
+        .replace(/\bFernsehen\b/gi, "")
+        .replace(/Central\+1/gi, "")
+        .replace(/HD\b/g, "")
+        .replace(/\s+/g, " ")
+        .trim()
+        .replace(/^[-\s]+|[-\s]+$/g, "");
+      return s || name;
+    },
+
     showDetail(event, channelName, sref = null) {
       this.modalEvent = event;
       this.modalChannel = channelName;

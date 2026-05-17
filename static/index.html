@@ -108,7 +108,7 @@
       <template x-for="(rec, idx) in (recsData && recsData.recommendations || [])"
                 :key="rec.sref + idx">
         <article class="event-row" :class="isLive(rec) ? 'live' : ''"
-                 @click="showDetail(rec, rec.channel_name)" role="button">
+                 @click="showDetail(rec, displayChannel(rec.channel_name))" role="button">
           <div class="event-meta">
             <div class="event-time"
                  x-text="formatTime(rec.start_time) + ' – ' + formatTime(rec.end_time)"></div>
@@ -117,7 +117,7 @@
               <div class="event-progress-fill"
                    :style="'width:' + progressPct(rec) + '%'"></div>
             </div>
-            <div class="event-channel" x-text="rec.channel_name"></div>
+            <div class="event-channel" x-text="displayChannel(rec.channel_name)"></div>
             <span class="event-match"
                   :class="rec.match_score >= 0.75 ? 'high' : rec.match_score >= 0.5 ? 'mid' : 'low'"
                   x-text="t('label.match', { pct: Math.round(rec.match_score*100) })"></span>
@@ -158,7 +158,7 @@
       <template x-for="ev in nowNextFlat" :key="ev.sref + ':' + ev._kind + ':' + ev.id">
         <article class="event-row" :class="isLive(ev) ? 'live' : ''"
                  :data-end="ev.end_time"
-                 @click="showDetail(ev, ev.channel_name, ev.sref)" role="button">
+                 @click="showDetail(ev, displayChannel(ev.channel_name), ev.sref)" role="button">
           <div class="event-meta">
             <div class="event-time"
                  x-text="formatTime(ev.start_time) + ' – ' + formatTime(ev.end_time)"></div>
@@ -167,7 +167,7 @@
               <div class="event-progress-fill"
                    :style="'width:' + progressPct(ev) + '%'"></div>
             </div>
-            <div class="event-channel" x-text="ev.channel_name"></div>
+            <div class="event-channel" x-text="displayChannel(ev.channel_name)"></div>
             <span class="event-match" x-show="recsMatch(ev.id) !== undefined"
                   :class="recsMatch(ev.id) >= 0.75 ? 'high' : recsMatch(ev.id) >= 0.5 ? 'mid' : 'low'"
                   x-text="t('label.match', { pct: Math.round((recsMatch(ev.id) || 0) * 100) })"></span>
@@ -216,7 +216,7 @@
     <div x-show="!loadingEpg" class="event-list">
       <template x-for="ev in epgEvents" :key="ev.id">
         <article class="event-row" :class="isLive(ev) ? 'live' : ''"
-                 :data-end="ev.end_time" @click="showDetail(ev, ev.channel_name)" role="button">
+                 :data-end="ev.end_time" @click="showDetail(ev, displayChannel(ev.channel_name))" role="button">
           <div class="event-meta">
             <div class="event-time"
                  x-text="formatTime(ev.start_time) + ' – ' + formatTime(ev.end_time)"></div>
@@ -225,7 +225,7 @@
               <div class="event-progress-fill"
                    :style="'width:' + progressPct(ev) + '%'"></div>
             </div>
-            <div class="event-channel" x-text="ev.channel_name"></div>
+            <div class="event-channel" x-text="displayChannel(ev.channel_name)"></div>
             <span class="event-match" x-show="recsMatch(ev.id) !== undefined"
                   :class="recsMatch(ev.id) >= 0.75 ? 'high' : recsMatch(ev.id) >= 0.5 ? 'mid' : 'low'"
                   x-text="t('label.match', { pct: Math.round((recsMatch(ev.id) || 0) * 100) })"></span>
