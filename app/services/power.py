@@ -57,8 +57,10 @@ async def _intertechno_power(rcfg: ReceiverConfig, on: bool) -> bool:
     try:
         async with httpx.AsyncClient(timeout=5) as client:
             resp = await client.post(f"{url}/change", data={"button": button})
-            ok = resp.status_code == 200
-            log.info("power.intertechno", receiver=rcfg.name, on=on, button=button, ok=ok)
+            # Gateway replies 302 (redirect to status page) on accepted button press.
+            ok = resp.status_code < 400
+            log.info("power.intertechno", receiver=rcfg.name, on=on,
+                     button=button, status=resp.status_code, ok=ok)
             return ok
     except Exception as e:
         log.error("power.intertechno_error", receiver=rcfg.name, error=str(e))

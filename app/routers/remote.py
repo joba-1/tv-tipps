@@ -75,18 +75,23 @@ async def zap_to_channel(req: ZapRequest):
     if rcfg is None or client is None:
         raise HTTPException(503, "No receiver available")
 
-    # Wake from deep standby (unreachable) → send WOL/intertechno, poll until online
+    # Wake from deep standby (unreachable) → send WOL/intertechno, poll until online.
+    # Intertechno cold-boots the box from mains power: full boot can take 90–120s.
     if not await client.is_online():
         if not await wake_receiver(rcfg):
             raise HTTPException(503, f"Could not wake {rcfg.name}")
-        log.info("remote.waking_receiver", receiver=rcfg.name)
-        for _ in range(6):
+        log.info("remote.waking_receiver", receiver=rcfg.name, method=rcfg.power_method)
+        max_wait_sec = 150 if rcfg.power_method == "intertechno" else 45
+        for _ in range(max_wait_sec // 5):
             await asyncio.sleep(5)
             if await client.is_online():
                 woke = True
                 break
         if not woke:
-            raise HTTPException(503, f"{rcfg.name} did not come online after wake")
+            raise HTTPException(
+                504,
+                f"{rcfg.name} did not come online within {max_wait_sec}s after wake",
+            )
 
     # Wake from light standby before zapping
     if not woke and await client.get_power_state() == "standby":
