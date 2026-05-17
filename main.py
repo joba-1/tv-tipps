@@ -74,6 +74,22 @@ app.mount("/static", StaticFiles(directory="static"), name="static")
 
 _version = (Path("VERSION").read_text().strip() if Path("VERSION").exists() else "0")
 
+# iOS Safari probes the document root for /apple-touch-icon*.png when the user
+# taps "Add to Home Screen", even though we also link it via <link rel> in the
+# HTML. Without these root routes, Safari falls back to rendering the first
+# letter of the page title (the dreaded generic "T" tile).
+_apple_icon = static_dir / "apple-touch-icon.png"
+
+
+@app.get("/apple-touch-icon.png", include_in_schema=False)
+@app.get("/apple-touch-icon-precomposed.png", include_in_schema=False)
+@app.get("/apple-touch-icon-180x180.png", include_in_schema=False)
+@app.get("/apple-touch-icon-180x180-precomposed.png", include_in_schema=False)
+async def apple_touch_icon():
+    if _apple_icon.exists():
+        return FileResponse(_apple_icon, media_type="image/png")
+    return HTMLResponse(status_code=404)
+
 
 @app.get("/{full_path:path}", include_in_schema=False)
 async def serve_spa(full_path: str):

@@ -20,7 +20,10 @@ function tvApp() {
 
     // Recommendations
     recsData: null,
-    loadingRecs: false,
+    // Default to "loading" so the spinner shows immediately on page mount —
+    // otherwise the empty-state ("no programmes") flashes in the gap between
+    // Alpine init and the first fetch.
+    loadingRecs: true,
     recsContext: "now",
     zapToast: "",
     _zapTimer: null,
@@ -37,13 +40,13 @@ function tvApp() {
 
     // Now & Next
     nowNext: [],
-    loadingNow: false,
+    loadingNow: true,
     lastRefresh: "—",
     staleBanner: false,
 
     // EPG range
     epgEvents: [],
-    loadingEpg: false,
+    loadingEpg: true,
     epgContext: "4h",
     epgSearchQuery: "",
     _epgSearchTimer: null,
