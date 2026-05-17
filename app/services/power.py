@@ -47,20 +47,35 @@ async def _wol_sleep(rcfg: ReceiverConfig) -> bool:
 
 
 async def _intertechno_power(rcfg: ReceiverConfig, on: bool) -> bool:
+    """Switch via joba-1/IntertechnoGateway. Its /change endpoint only knows the
+    button names from its own HTML: 'button-a'..'button-d' to select a family,
+    then 'button-1-on'..'button-3-on'/'button-x-on' (and -off variants) to fire.
+    Anything else is silently ignored — that's why our old 'D2on' format never
+    triggered the device. We do the two-step (family-select, then on/off)."""
     url = settings.intertechno_url
     family = rcfg.intertechno_family or settings.intertechno_family
     device = rcfg.intertechno_device if rcfg.intertechno_family else settings.intertechno_device
     if not url or not family:
         log.warning("power.intertechno_skipped", receiver=rcfg.name, reason="not configured")
         return False
-    button = f"{family}{device}{'on' if on else 'off'}"
+    fam_letter = str(family).strip().lower()[:1]
+    if fam_letter not in ("a", "b", "c", "d"):
+        log.warning("power.intertechno_bad_family", receiver=rcfg.name, family=family)
+        return False
+    if device not in (1, 2, 3):
+        log.warning("power.intertechno_bad_device", receiver=rcfg.name,
+                    device=device, hint="gateway only exposes devices 1/2/3")
+        return False
+    family_btn = f"button-{fam_letter}"
+    action_btn = f"button-{device}-{'on' if on else 'off'}"
     try:
         async with httpx.AsyncClient(timeout=5) as client:
-            resp = await client.post(f"{url}/change", data={"button": button})
-            # Gateway replies 302 (redirect to status page) on accepted button press.
-            ok = resp.status_code < 400
+            r1 = await client.post(f"{url}/change", data={"button": family_btn})
+            r2 = await client.post(f"{url}/change", data={"button": action_btn})
+            ok = r1.status_code < 400 and r2.status_code < 400
             log.info("power.intertechno", receiver=rcfg.name, on=on,
-                     button=button, status=resp.status_code, ok=ok)
+                     family_btn=family_btn, action_btn=action_btn,
+                     status1=r1.status_code, status2=r2.status_code, ok=ok)
             return ok
     except Exception as e:
         log.error("power.intertechno_error", receiver=rcfg.name, error=str(e))
