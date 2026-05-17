@@ -199,15 +199,30 @@ def _close_session(state: dict, ended_at: datetime, db: Session) -> None:
     state["confirmed"] = False
 
 
+_last_full_sweep_at: dict[str, datetime] = {}  # receiver_name → last full sweep
+_skipped_channels: dict[str, set[int]] = {}    # receiver_name → channel_ids skipped last sweep
+_consecutive_empty: dict[int, int] = {}        # channel_id → consecutive full sweeps with no future EPG
+# Threshold for the "overdue" promotion (<24h so a missed 03:30 cron is picked
+# up by the next hourly refresh that finds a box online).
+_FULL_SWEEP_OVERDUE_HOURS = 23
+# Log a channel as "out of EPG" only after this many consecutive sweeps with
+# no future events — filters single-event misses and the post-restart cold start.
+_EMPTY_SWEEP_WARN_THRESHOLD = 2
+
+
 async def _refresh_all_epg(full: bool = False) -> None:
-    """Refresh EPG from the best available receiver.
-    Tries all online receivers for now/next; uses best one for full service fetch.
-    """
+    """Refresh EPG from every online receiver.
+    Now/next refresh always runs on online boxes. Full sweep runs per-receiver:
+    daily 03:30 + opportunistic catch-up if that receiver's own last full sweep
+    is overdue. Channels skipped because the box returned sparse data (cold OWIF
+    cache) are retried first on the next sweep."""
     db = SessionLocal()
     try:
         from app.services.receivers import get_receiver_configs
+        from app.models import Channel, BouquetChannel, Bouquet
+        from app.services.epg import refresh_epg_service
         receivers_cfg = get_receiver_configs(db)
-        best = None
+        online_receivers: list[tuple[Receiver, EnigmaClient, object]] = []
         for rcfg in receivers_cfg:
             receiver = db.query(Receiver).filter_by(name=rcfg.name).first()
             if not receiver:
@@ -215,29 +230,83 @@ async def _refresh_all_epg(full: bool = False) -> None:
             client = EnigmaClient(rcfg.ip, mock=settings.mock_receivers)
             if await client.is_online():
                 await refresh_now_next(receiver, client, db)
-                if best is None or rcfg.has_genre:
-                    best = (receiver, client, rcfg)
+                online_receivers.append((receiver, client, rcfg))
             else:
                 log.info("epg.receiver_offline_skip", receiver=rcfg.name)
 
-        if full and best:
-            receiver, client, _ = best
-            from app.models import Channel, BouquetChannel, Bouquet
-            from app.services.epg import refresh_epg_service
+        for receiver, client, rcfg in online_receivers:
+            last = _last_full_sweep_at.get(receiver.name)
+            overdue = (
+                last is None
+                or (utcnow() - last).total_seconds() > _FULL_SWEEP_OVERDUE_HOURS * 3600
+            )
+            should_sweep = full or overdue
+            if not should_sweep:
+                continue
+            if not full:
+                log.info("epg.full_sweep_catchup", receiver=receiver.name,
+                         last_full=str(last))
+
             bouquet_ids = [b.id for b in db.query(Bouquet).filter_by(receiver_id=receiver.id).all()]
             channel_ids = {
                 bc.channel_id for bc in
                 db.query(BouquetChannel).filter(BouquetChannel.bouquet_id.in_(bouquet_ids)).all()
             }
             channels = db.query(Channel).filter(Channel.id.in_(channel_ids)).all()
-            log.info("epg.full_refresh_start", receiver=receiver.name, channels=len(channels))
+            # Retry previously-skipped channels first — most likely to flip to
+            # populated once OWIF has settled or the user has zapped through.
+            prev_skipped = _skipped_channels.get(receiver.name, set())
+            channels.sort(key=lambda c: 0 if c.id in prev_skipped else 1)
+
+            log.info("epg.full_refresh_start", receiver=receiver.name,
+                     channels=len(channels), retry_priority=len(prev_skipped))
+            skipped: set[int] = set()
             for ch in channels:
-                await refresh_epg_service(ch, client, db, hours=24)
-            log.info("epg.full_refresh_done", receiver=receiver.name)
+                count = await refresh_epg_service(ch, client, db, hours=24)
+                if count == 0:
+                    skipped.add(ch.id)
+            _skipped_channels[receiver.name] = skipped
+            _last_full_sweep_at[receiver.name] = utcnow()
+            log.info("epg.full_refresh_done", receiver=receiver.name,
+                     skipped=len(skipped))
+            _check_empty_epg(receiver, channel_ids, db)
     except Exception as e:
         log.error("epg.refresh_error", error=str(e))
     finally:
         db.close()
+
+
+def _check_empty_epg(receiver: Receiver, channel_ids: set[int], db: Session) -> None:
+    """After a full sweep: flag channels whose DB has no future events.
+    A channel is only logged once it has been empty for several sweeps in a row,
+    so single misses and post-restart cold starts don't spam."""
+    from app.models import Channel, EpgEvent
+    from sqlalchemy import func as _func
+    now = utcnow()
+    rows = (
+        db.query(Channel.id, Channel.name,
+                 _func.max(EpgEvent.end_time).label("max_end"))
+        .outerjoin(EpgEvent, EpgEvent.channel_id == Channel.id)
+        .filter(Channel.id.in_(channel_ids))
+        .group_by(Channel.id)
+        .all()
+    )
+    flagged: list[dict] = []
+    for ch_id, name, max_end in rows:
+        empty = (max_end is None) or (max_end <= now)
+        if empty:
+            n = _consecutive_empty.get(ch_id, 0) + 1
+            _consecutive_empty[ch_id] = n
+            if n >= _EMPTY_SWEEP_WARN_THRESHOLD:
+                flagged.append({"channel_id": ch_id, "name": name,
+                                "sweeps_empty": n,
+                                "last_event_end": str(max_end) if max_end else None})
+        else:
+            _consecutive_empty.pop(ch_id, None)
+    if flagged:
+        log.warning("epg.channels_out_of_data",
+                    receiver=receiver.name, count=len(flagged),
+                    channels=flagged[:40])  # cap log payload
     # Warm recommendation cache in background — must NOT block EPG refresh or
     # startup; each LLM call takes seconds and we warm all contexts × users.
     asyncio.create_task(_warm_recommendation_cache())

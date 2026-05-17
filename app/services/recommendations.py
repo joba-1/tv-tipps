@@ -31,6 +31,17 @@ _CACHE_TTL = {"now": 90, "next": 90, "prime": 120, "today": 360}
 # "now"/"next" would just slowly shed ended items until empty.
 _DRIFT_REGEN_MIN = {"now": 15, "next": 20, "prime": 60, "today": 120}
 
+# Prompt-shaping constants — scaled 3.5× from the pre-2026-05 baseline so the
+# largest prompts target ~75% of NUM_CTX. See AGENTS.md "Ollama / AI tips".
+from app.services import ollama as _ollama
+_NUM_CTX_TOKENS = _ollama.NUM_CTX
+_PROMPT_TOKEN_BUDGET = int(_NUM_CTX_TOKENS * 0.75)  # ~12288
+_BATCH_SIZE = 140              # candidates per LLM call
+_HISTORY_LIMIT = 70            # sessions in prompt
+_REACTION_LIMIT = 52           # likes / dislikes each
+_TOP_GENRES_IN_PROMPT = 17
+_TOP_CHANNELS_IN_PROMPT = 17
+
 
 def _progress_pct(ev: EpgEvent, now) -> float:
     """How far into the event we are (0..100). 0 for not-yet-started/no-duration."""
@@ -205,7 +216,7 @@ def rule_based_rank(candidates: list[EpgEvent], context: str, db: Session) -> li
     ]
 
 
-def _get_recent_reactions(user_id: int, db: Session, limit: int = 15) -> tuple[list[dict], list[dict]]:
+def _get_recent_reactions(user_id: int, db: Session, limit: int = _REACTION_LIMIT) -> tuple[list[dict], list[dict]]:
     """Return (likes, dislikes) as separate lists, most recent first."""
     rows = (
         db.query(UserLike)
@@ -236,7 +247,7 @@ def _get_recent_history(user_id: int, db: Session) -> list[dict]:
             ViewingSession.started_at >= cutoff,
         )
         .order_by(ViewingSession.started_at.desc())
-        .limit(20)
+        .limit(_HISTORY_LIMIT)
         .all()
     )
     history = []
@@ -267,14 +278,14 @@ def _build_prompt(
     stated_prefs = profile.get("stated_preferences") or ""
     genres_str = ", ".join(
         f"{g['genre']} ({g['share']*100:.0f}%)"
-        for g in profile.get("top_genres", [])[:5]
+        for g in profile.get("top_genres", [])[:_TOP_GENRES_IN_PROMPT]
         if g["genre"] != "unknown"
     )
-    channels_str = ", ".join(g["name"] for g in profile.get("top_channels", [])[:5])
+    channels_str = ", ".join(g["name"] for g in profile.get("top_channels", [])[:_TOP_CHANNELS_IN_PROMPT])
 
     hist_lines = [
         f"  - {h.get('title','?')} | {h.get('channel','?')} | {h.get('genre') or 'unbekannt'} | {h.get('duration_min',0):.0f} min"
-        for h in history[:20]
+        for h in history[:_HISTORY_LIMIT]
     ]
     hist_str = "\n".join(hist_lines) if hist_lines else "  (keine Historie)"
 
@@ -340,8 +351,10 @@ Pflichtfelder mit genau diesen Schlüsseln in Kleinbuchstaben: "taste_summary", 
 "ranking" ist eine Liste von 5–8 Ganzzahlen (Indizes aus der KANDIDATENLISTE oben), absteigend nach Passgenauigkeit.
 "reasons" ist eine Map: Schlüssel = die Indizes als Strings, Wert = ein Satz Begründung.
 
+WICHTIG zu den BEGRÜNDUNGEN: jede Begründung muss erklären, WARUM diese Sendung zu {user_name} passt — bezogen auf die Vorlieben, Likes/Dislikes, Lieblings-Genres/Sender oder konkrete Titel aus der Sehhistorie. Beschreibe NICHT die Sendung selbst (Inhalt, Sender, Genre allein) — der Bezug zum Nutzer ist Pflicht.
+
 Konkretes Beispiel (mit Beispiel-Zahlen, ersetze sie durch die tatsächlich passenden Indizes):
-{{"taste_summary":"{user_name} mag Sci-Fi und Doku.","ranking":[3,1,7,2,5],"reasons":{{"3":"Sci-Fi-Serie, passt zum Profil.","1":"Hochwertige Doku.","7":"Action-Thriller wie zuletzt geschaut.","2":"Klassischer Film.","5":"Wissenschaftsmagazin."}}}}
+{{"taste_summary":"{user_name} mag Sci-Fi und Doku.","ranking":[3,1,7,2,5],"reasons":{{"3":"Sci-Fi wie das von dir geschaute 'The Expanse'.","1":"Doku zu deinem Lieblings-Genre Wissenschaft.","7":"Action-Thriller wie 'A-Team', das du gestern gesehen hast.","2":"Klassiker auf ARTE — einer deiner meistgesehenen Sender.","5":"Wissenschaftsmagazin, passend zu deinen 👍 für 'MAITHINK X'."}}}}
 
 Wenn ein Kandidat den Hinweis "bereits X% gelaufen" trägt, dann gilt: je höher der Wert, desto weniger attraktiv — bevorzuge frischere Sendungen mit ähnlicher Passung.
 
@@ -476,9 +489,6 @@ def _extract_indices_from_text(text: str, max_count: int = 8) -> list[int]:
 # Keep num_ctx (set in ollama.py) and budget aligned. We aim to stay well below
 # num_ctx so the model has room to generate a complete JSON response without
 # truncation — cutoff JSON would be unparseable.
-_NUM_CTX_TOKENS = 16384
-_PROMPT_TOKEN_BUDGET = 12000  # leaves ~4K for response
-_BATCH_SIZE = 40              # candidates per LLM call
 
 
 def _estimate_tokens(text: str) -> int:
@@ -491,8 +501,11 @@ async def _try_ollama_single_batch(
     user_name: str, context: str, profile: dict,
     history: list[dict], likes: list[dict], dislikes: list[dict],
     candidates: list[EpgEvent], db: Session,
+    _retry: bool = False,
 ) -> dict | None:
-    """One LLM call over a single batch of candidates."""
+    """One LLM call over a single batch of candidates.
+    If Ollama reports input/output overflow against num_ctx, the result is
+    discarded and one retry runs with halved inputs and candidates."""
     prompt = _build_prompt(user_name, context, profile, history, likes, dislikes, candidates, db)
     est = _estimate_tokens(prompt)
     if est > _PROMPT_TOKEN_BUDGET:
@@ -503,6 +516,24 @@ async def _try_ollama_single_batch(
         log.info("recs.prompt_size", est_tokens=est, candidates=len(candidates))
 
     raw = await ask_json(prompt, caller="recs")
+    usage = _ollama.last_usage() or {}
+    if usage.get("prompt_overflow") or usage.get("completion_truncated"):
+        log.warning("recs.ctx_overflow",
+                    prompt_tokens=usage.get("prompt_tokens"),
+                    completion_tokens=usage.get("completion_tokens"),
+                    num_ctx=usage.get("num_ctx"),
+                    prompt_overflow=usage.get("prompt_overflow"),
+                    completion_truncated=usage.get("completion_truncated"),
+                    candidates=len(candidates), retry=not _retry)
+        if not _retry and len(candidates) > 4:
+            half_c = max(4, len(candidates) // 2)
+            half = lambda xs: xs[:max(1, len(xs) // 2)] if xs else xs
+            return await _try_ollama_single_batch(
+                user_name, context, profile,
+                half(history), half(likes), half(dislikes),
+                candidates[:half_c], db, _retry=True,
+            )
+        return None
     if raw is None:
         log.warning("recommendations.bad_llm_response", raw_type="None", keys=None)
         return None

@@ -197,6 +197,7 @@ async def admin_status(db: Session = Depends(get_db)):
             last_seen=receiver.last_seen.isoformat() if receiver and receiver.last_seen else None,
             epg_cached_at=epg_cached_at, power_method=rcfg.power_method,
             has_genre=rcfg.has_genre, priority=rcfg.priority, location=rcfg.location,
+            default_user=rcfg.default_user or None,
         ))
     db.commit()
 
@@ -304,28 +305,46 @@ def active_viewers():
 
 @router.get("/api/admin/unattributed-sessions")
 def list_unattributed_sessions(limit: int = 100, db: Session = Depends(get_db)):
-    """Confirmed viewing sessions without a user — visible to the recommender
-    only after an admin attributes them."""
+    """Confirmed viewing sessions without a user, restricted to ones that
+    are actually useful as a viewing signal: a resolved EPG event AND at
+    least half its duration watched. Visible to the recommender only after
+    an admin attributes them."""
     from app.models import ViewingSession, EpgEvent, Channel, Receiver as RcvModel
     rows = (
         db.query(ViewingSession, EpgEvent, Channel, RcvModel)
-        .outerjoin(EpgEvent, ViewingSession.epg_event_id == EpgEvent.id)
+        .join(EpgEvent, ViewingSession.epg_event_id == EpgEvent.id)
         .outerjoin(Channel, ViewingSession.channel_id == Channel.id)
         .outerjoin(RcvModel, ViewingSession.receiver_id == RcvModel.id)
-        .filter(ViewingSession.user_id == None, ViewingSession.confirmed == True)  # noqa: E711, E712
+        .filter(
+            ViewingSession.user_id == None,  # noqa: E711
+            ViewingSession.confirmed == True,  # noqa: E712
+            EpgEvent.title != None,  # noqa: E711
+            EpgEvent.title != "",
+        )
         .order_by(ViewingSession.started_at.desc())
-        .limit(limit)
+        .limit(limit * 2)  # filter further client-side after %-watched check
         .all()
     )
-    return {"sessions": [{
-        "id": s.id,
-        "title": (ev.title if ev else None) or "(unknown)",
-        "channel_name": ch.name if ch else None,
-        "receiver_name": rc.name if rc else None,
-        "started_at": s.started_at.isoformat() if s.started_at else None,
-        "duration_sec": s.duration_sec,
-        "source": s.source,
-    } for s, ev, ch, rc in rows]}
+    out = []
+    for s, ev, ch, rc in rows:
+        ev_dur = int((ev.end_time - ev.start_time).total_seconds()) if ev and ev.end_time and ev.start_time else 0
+        watched = s.duration_sec or 0
+        if ev_dur <= 0 or watched * 2 < ev_dur:
+            continue
+        out.append({
+            "id": s.id,
+            "title": ev.title,
+            "channel_name": ch.name if ch else None,
+            "receiver_name": rc.name if rc else None,
+            "started_at": s.started_at.isoformat() if s.started_at else None,
+            "duration_sec": watched,
+            "event_duration_sec": ev_dur,
+            "watched_pct": min(999, round(100.0 * watched / ev_dur, 0)),
+            "source": s.source,
+        })
+        if len(out) >= limit:
+            break
+    return {"sessions": out}
 
 
 class SessionAssignRequest(BaseModel):

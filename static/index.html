@@ -279,10 +279,11 @@
             </div>
             <label class="admin-receiver-defuser">
               <small x-text="t('label.receiver_default_user')"></small>
-              <select @change="setDefaultUser(r.name, $event.target.value)">
-                <option value="" :selected="!r.default_user">—</option>
+              <select :value="r.default_user || ''"
+                      @change="setDefaultUser(r.name, $event.target.value)">
+                <option value="">—</option>
                 <template x-for="u in users" :key="u.slug">
-                  <option :value="u.slug" :selected="r.default_user === u.slug" x-text="u.name"></option>
+                  <option :value="u.slug" x-text="u.name"></option>
                 </template>
               </select>
             </label>
@@ -382,23 +383,38 @@
     <div class="admin-section" x-show="unattributed.length > 0">
       <h3 x-text="t('label.unattributed_heading')"></h3>
       <p><small x-text="t('label.unattributed_hint')"></small></p>
-      <ul class="admin-activity-list">
-        <template x-for="s in unattributed" :key="s.id">
-          <li>
-            <span class="admin-activity-title" x-text="s.title"></span>
-            <small x-text="(s.channel_name || '?') + ' · ' + (s.receiver_name || '?') + ' · ' + formatDate(s.started_at) + ' · ' + Math.round((s.duration_sec||0)/60) + 'min'"></small>
-            <select @change="assignSession(s.id, $event.target.value); $event.target.value=''">
-              <option value="" x-text="t('label.assign_to')"></option>
-              <template x-for="u in users" :key="u.slug">
-                <option :value="u.slug" x-text="u.name"></option>
-              </template>
-            </select>
-            <button class="outline secondary admin-delete-btn"
-                    @click="deleteSession(null, s.id)"
-                    x-text="t('btn.delete')"></button>
-          </li>
-        </template>
-      </ul>
+      <div class="admin-activity-scroll" :class="unattributed.length > 20 ? 'tall' : ''">
+      <table class="admin-activity-table">
+        <thead>
+          <tr>
+            <th x-text="t('th.title')"></th>
+            <th x-text="t('th.channel')"></th>
+            <th x-text="t('th.receiver')"></th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody>
+          <template x-for="s in unattributed" :key="s.id">
+            <tr>
+              <td class="admin-activity-title" x-text="s.title"></td>
+              <td x-text="displayChannel(s.channel_name) || '?'"></td>
+              <td x-text="s.receiver_name || '?'"></td>
+              <td class="admin-activity-actions">
+                <select @change="assignSession(s.id, $event.target.value); $event.target.value=''">
+                  <option value="" x-text="t('label.assign_to')"></option>
+                  <template x-for="u in users" :key="u.slug">
+                    <option :value="u.slug" x-text="u.name"></option>
+                  </template>
+                </select>
+                <button class="outline secondary admin-delete-btn"
+                        @click="deleteSession(null, s.id)"
+                        x-text="t('btn.delete')"></button>
+              </td>
+            </tr>
+          </template>
+        </tbody>
+      </table>
+      </div>
     </div>
 
     <!-- Viewing history + likes/dislikes (influence match score) -->
@@ -417,34 +433,65 @@
             <div class="admin-activity-empty"
                  x-show="activity[u.slug] && activity[u.slug].sessions.length === 0"
                  x-text="t('label.activity_no_sessions')"></div>
-            <ul class="admin-activity-list">
-              <template x-for="s in (activity[u.slug] && activity[u.slug].sessions) || []" :key="s.id">
-                <li>
-                  <span class="admin-activity-title" x-text="s.title"></span>
-                  <small x-text="(s.channel_name || '?') + ' · ' + formatDate(s.started_at) + ' · ' + Math.round((s.duration_sec||0)/60) + 'min'"></small>
-                  <button class="outline secondary admin-delete-btn"
-                          @click="deleteSession(u.slug, s.id)"
-                          x-text="t('btn.delete')"></button>
-                </li>
-              </template>
-            </ul>
+            <div class="admin-activity-scroll"
+                 x-show="activity[u.slug] && activity[u.slug].sessions.length > 0"
+                 :class="(activity[u.slug] && activity[u.slug].sessions.length > 20) ? 'tall' : ''">
+              <table class="admin-activity-table">
+                <thead>
+                  <tr>
+                    <th x-text="t('th.title')"></th>
+                    <th x-text="t('th.channel')"></th>
+                    <th></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <template x-for="s in (activity[u.slug] && activity[u.slug].sessions) || []" :key="s.id">
+                    <tr>
+                      <td class="admin-activity-title" x-text="s.title"></td>
+                      <td x-text="displayChannel(s.channel_name) || '?'"></td>
+                      <td class="admin-activity-actions">
+                        <button class="outline secondary admin-delete-btn"
+                                @click="deleteSession(u.slug, s.id)"
+                                x-text="t('btn.delete')"></button>
+                      </td>
+                    </tr>
+                  </template>
+                </tbody>
+              </table>
+            </div>
 
             <h4 x-text="t('label.activity_likes')"></h4>
             <div class="admin-activity-empty"
                  x-show="activity[u.slug] && activity[u.slug].likes.length === 0"
                  x-text="t('label.activity_no_likes')"></div>
-            <ul class="admin-activity-list">
-              <template x-for="l in (activity[u.slug] && activity[u.slug].likes) || []" :key="l.id">
-                <li>
-                  <span x-text="l.sentiment === 'dislike' ? '👎' : '👍'"></span>
-                  <span class="admin-activity-title" x-text="l.title"></span>
-                  <small x-text="(l.channel_name || '?') + (l.genre ? ' · ' + l.genre : '') + ' · ' + formatDate(l.created_at)"></small>
-                  <button class="outline secondary admin-delete-btn"
-                          @click="deleteLike(u.slug, l.id)"
-                          x-text="t('btn.delete')"></button>
-                </li>
-              </template>
-            </ul>
+            <div class="admin-activity-scroll"
+                 x-show="activity[u.slug] && activity[u.slug].likes.length > 0"
+                 :class="(activity[u.slug] && activity[u.slug].likes.length > 20) ? 'tall' : ''">
+              <table class="admin-activity-table">
+                <thead>
+                  <tr>
+                    <th></th>
+                    <th x-text="t('th.title')"></th>
+                    <th x-text="t('th.channel')"></th>
+                    <th></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <template x-for="l in (activity[u.slug] && activity[u.slug].likes) || []" :key="l.id">
+                    <tr>
+                      <td x-text="l.sentiment === 'dislike' ? '👎' : '👍'"></td>
+                      <td class="admin-activity-title" x-text="l.title"></td>
+                      <td x-text="displayChannel(l.channel_name) || '?' + (l.genre ? ' · ' + l.genre : '')"></td>
+                      <td class="admin-activity-actions">
+                        <button class="outline secondary admin-delete-btn"
+                                @click="deleteLike(u.slug, l.id)"
+                                x-text="t('btn.delete')"></button>
+                      </td>
+                    </tr>
+                  </template>
+                </tbody>
+              </table>
+            </div>
           </div>
         </details>
       </template>

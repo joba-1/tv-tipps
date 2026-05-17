@@ -406,6 +406,15 @@ nav details ul a {
 .admin-activity-list small { opacity: 0.7; font-size: 0.8rem; flex-shrink: 0; }
 .admin-activity-list button { margin: 0; padding: 0.15rem 0.5rem; font-size: 0.8rem; flex-shrink: 0; }
 .admin-activity-list select { margin: 0; padding: 0.15rem 0.4rem; font-size: 0.8rem; flex-shrink: 0; width: auto; }
+.admin-activity-scroll { overflow-x: auto; margin: 0 0 1rem; }
+.admin-activity-scroll.tall { max-height: 28rem; overflow-y: auto; }
+.admin-activity-table { width: 100%; font-size: 0.85rem; border-collapse: collapse; }
+.admin-activity-table th { text-align: left; font-weight: normal; opacity: 0.7; font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.02em; padding: 0.25rem 0.5rem 0.25rem 0; white-space: nowrap; }
+.admin-activity-table td { padding: 0.25rem 0.5rem 0.25rem 0; border-top: 1px solid var(--pico-muted-border-color); vertical-align: middle; white-space: nowrap; }
+.admin-activity-table td.admin-activity-title { white-space: normal; }
+.admin-activity-table .admin-activity-actions { display: flex; gap: 0.25rem; justify-content: flex-end; white-space: nowrap; }
+.admin-activity-table .admin-activity-actions select,
+.admin-activity-table .admin-activity-actions button { margin: 0; padding: 0.15rem 0.5rem; font-size: 0.8rem; width: auto; }
 .admin-receiver-defuser { display: flex; align-items: center; gap: 0.5rem; margin-top: 0.25rem; }
 .admin-receiver-defuser small { opacity: 0.7; }
 .admin-receiver-defuser select { margin: 0; padding: 0.15rem 0.4rem; width: auto; font-size: 0.85rem; }

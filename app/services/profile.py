@@ -64,11 +64,11 @@ def compute_profile(user_id: int, db: Session) -> dict:
     total = len(sessions)
     top_genres = [
         {"genre": g, "count": c, "share": round(c / max(total, 1), 2)}
-        for g, c in genre_counts.most_common(8)
+        for g, c in genre_counts.most_common(20)
     ]
     top_channels = [
         {"name": n, "sref": channel_srefs.get(n, ""), "count": c, "share": round(c / max(total, 1), 2)}
-        for n, c in channel_counts.most_common(10)
+        for n, c in channel_counts.most_common(25)
     ]
     avg_duration_min = round(sum(durations) / max(len(durations), 1) / 60, 1)
 

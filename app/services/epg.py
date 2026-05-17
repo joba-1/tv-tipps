@@ -1,6 +1,7 @@
 """EPG fetch, cache, and query."""
 from __future__ import annotations
 from datetime import datetime
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from app.models import Channel, EpgEvent, Receiver, Bouquet
@@ -59,19 +60,22 @@ async def refresh_now_next(receiver: Receiver, client: EnigmaClient, db: Session
                         genre=ev.genre,
                         cached_at=now,
                     )
-                    .on_conflict_do_update(
-                        index_elements=["channel_id", "start_time"],
-                        set_={
-                            "title": ev.title,
-                            "short_desc": ev.short_desc,
-                            "long_desc": ev.long_desc,
-                            "end_time": ev.end_time,
-                            "duration_sec": ev.duration_sec,
-                            "event_id": ev.event_id,
-                            "genre": ev.genre,
-                            "cached_at": now,
-                        },
-                    )
+                )
+                stmt = stmt.on_conflict_do_update(
+                    index_elements=["channel_id", "start_time"],
+                    set_={
+                        "title": ev.title,
+                        "short_desc": ev.short_desc,
+                        "long_desc": ev.long_desc,
+                        "end_time": ev.end_time,
+                        "duration_sec": ev.duration_sec,
+                        "event_id": ev.event_id,
+                        # Don't blank out a known genre with NULL — receivers
+                        # without has_genre return None even for events another
+                        # receiver already enriched.
+                        "genre": func.coalesce(stmt.excluded.genre, EpgEvent.genre),
+                        "cached_at": now,
+                    },
                 )
                 db.execute(stmt)
                 total += 1
@@ -108,19 +112,21 @@ async def refresh_epg_service(channel: Channel, client: EnigmaClient, db: Sessio
                 start_time=ev.start_time,
                 end_time=ev.end_time,
                 duration_sec=ev.duration_sec,
+                genre=ev.genre,
                 cached_at=now,
             )
-            .on_conflict_do_update(
-                index_elements=["channel_id", "start_time"],
-                set_={
-                    "title": ev.title,
-                    "end_time": ev.end_time,
-                    "duration_sec": ev.duration_sec,
-                    "event_id": ev.event_id,
-                    "genre": ev.genre,
-                    "cached_at": now,
-                },
-            )
+        )
+        stmt = stmt.on_conflict_do_update(
+            index_elements=["channel_id", "start_time"],
+            set_={
+                "title": ev.title,
+                "end_time": ev.end_time,
+                "duration_sec": ev.duration_sec,
+                "event_id": ev.event_id,
+                # Preserve a previously-known genre when the new fetch lacks one.
+                "genre": func.coalesce(stmt.excluded.genre, EpgEvent.genre),
+                "cached_at": now,
+            },
         )
         db.execute(stmt)
         count += 1

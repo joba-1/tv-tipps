@@ -53,6 +53,7 @@ class ReceiverStatus(BaseModel):
     has_genre: bool = False
     priority: int = 99
     location: str = ""
+    default_user: str | None = None
 
 
 class AdminStatus(BaseModel):

@@ -208,7 +208,7 @@ class TestTryOllama:
             "reasons": {"1": "Perfect match"},
         }
         with patch("app.services.recommendations.ask_json", new_callable=AsyncMock, return_value=ai_response):
-            result = await _try_ollama("Alice", "now", {}, [], [], [ev], db)
+            result = await _try_ollama("Alice", "now", {}, [], [], [], [ev], db)
 
         assert result is not None
         assert result["taste_summary"] == "Loves action"
@@ -226,7 +226,7 @@ class TestTryOllama:
         db.commit()
 
         with patch("app.services.recommendations.ask_json", new_callable=AsyncMock, return_value=None):
-            result = await _try_ollama("Alice", "now", {}, [], [], [ev], db)
+            result = await _try_ollama("Alice", "now", {}, [], [], [], [ev], db)
 
         assert result is None
 
@@ -243,7 +243,7 @@ class TestTryOllama:
             "reasons": {},
         }
         with patch("app.services.recommendations.ask_json", new_callable=AsyncMock, return_value=ai_response):
-            result = await _try_ollama("Alice", "now", {}, [], [], [ev], db)
+            result = await _try_ollama("Alice", "now", {}, [], [], [], [ev], db)
 
         assert result is not None
         assert len(result["recommendations"]) == 1
