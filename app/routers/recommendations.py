@@ -11,15 +11,15 @@ _VALID_CONTEXTS = ("now", "next", "prime", "today")
 @router.get("/api/recommendations")
 async def get_recommendations(
     context: str = Query(default="now", description="now | next | prime | today"),
-    tv_tips_user: str | None = Cookie(default=None),
+    tv_tipps_user: str | None = Cookie(default=None),
     db: Session = Depends(get_db),
 ):
     if context not in _VALID_CONTEXTS:
         raise HTTPException(400, f"context must be one of: {', '.join(_VALID_CONTEXTS)}")
 
     user = None
-    if tv_tips_user:
-        user = db.query(User).filter_by(slug=tv_tips_user).first()
+    if tv_tipps_user:
+        user = db.query(User).filter_by(slug=tv_tipps_user).first()
     if not user:
         user = db.query(User).first()
     if not user:

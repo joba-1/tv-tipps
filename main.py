@@ -55,7 +55,7 @@ async def lifespan(app: FastAPI):
     log.info("shutdown.done")
 
 
-app = FastAPI(title="tv-tips", lifespan=lifespan)
+app = FastAPI(title="tv-tipps", lifespan=lifespan)
 
 # Routers
 from app.routers import now_next, epg, admin, recommendations, remote, i18n, likes  # noqa: E402

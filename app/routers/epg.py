@@ -18,7 +18,7 @@ def epg_range(
     start: str | None = Query(default=None, description="ISO UTC start"),
     end: str | None = Query(default=None, description="ISO UTC end"),
     context: str | None = Query(default=None, description="'tonight' or 'evening'"),
-    tv_tips_user: str | None = Cookie(default=None),
+    tv_tipps_user: str | None = Cookie(default=None),
     db: Session = Depends(get_db),
 ):
     from app.models import User
@@ -42,8 +42,8 @@ def epg_range(
         start_dt, end_dt = hours_range(4)  # default: next 4h
 
     user_id = None
-    if tv_tips_user:
-        user = db.query(User).filter_by(slug=tv_tips_user).first()
+    if tv_tipps_user:
+        user = db.query(User).filter_by(slug=tv_tipps_user).first()
         if user:
             user_id = user.id
 
@@ -60,15 +60,15 @@ def epg_range(
 def epg_search(
     q: str = Query(min_length=2, max_length=100, description="Free-text query"),
     days: int = Query(default=7, ge=1, le=14),
-    tv_tips_user: str | None = Cookie(default=None),
+    tv_tipps_user: str | None = Cookie(default=None),
     db: Session = Depends(get_db),
 ):
     """Search future EPG events by title/short_desc/long_desc, case-insensitive."""
     from app.models import User
 
     user_id = None
-    if tv_tips_user:
-        user = db.query(User).filter_by(slug=tv_tips_user).first()
+    if tv_tipps_user:
+        user = db.query(User).filter_by(slug=tv_tipps_user).first()
         if user:
             user_id = user.id
 

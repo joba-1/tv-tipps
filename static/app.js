@@ -1,4 +1,4 @@
-// tv-tips Alpine.js application
+// tv-tipps Alpine.js application
 
 function tvApp() {
   return {
@@ -102,10 +102,10 @@ function tvApp() {
     },
 
     async _detectLang() {
-      const cookie = this._getCookie("tv_tips_lang");
+      const cookie = this._getCookie("tv_tipps_lang");
       if (cookie) return cookie;
       const browser = (navigator.language || "de").split("-")[0].toLowerCase();
-      document.cookie = `tv_tips_lang=${browser}; path=/; max-age=31536000; SameSite=Lax`;
+      document.cookie = `tv_tipps_lang=${browser}; path=/; max-age=31536000; SameSite=Lax`;
       return browser;
     },
 
@@ -149,13 +149,13 @@ function tvApp() {
 
       await this.loadReceivers();
 
-      const cookieUser = this._getCookie("tv_tips_user");
+      const cookieUser = this._getCookie("tv_tipps_user");
       this.currentUser = this.users.find(u => u.slug === cookieUser) || this.users[0] || null;
       if (this.currentUser && !cookieUser) {
-        document.cookie = `tv_tips_user=${this.currentUser.slug}; path=/; max-age=31536000; SameSite=Lax`;
+        document.cookie = `tv_tipps_user=${this.currentUser.slug}; path=/; max-age=31536000; SameSite=Lax`;
       }
 
-      const cookieReceiver = this._getCookie("tv_tips_receiver");
+      const cookieReceiver = this._getCookie("tv_tipps_receiver");
       this.selectedReceiver = this.receivers.find(r => r.name === cookieReceiver) || null;
 
       await this.loadLikes();
@@ -189,7 +189,7 @@ function tvApp() {
           if (ur.ok) {
             this.users = await ur.json();
             if (!this.currentUser && this.users.length > 0) {
-              const slug = this._getCookie("tv_tips_user");
+              const slug = this._getCookie("tv_tipps_user");
               this.currentUser = this.users.find(u => u.slug === slug) || this.users[0];
             }
           }
@@ -808,7 +808,7 @@ function tvApp() {
 
     async setUser(slug) {
       this.currentUser = this.users.find(u => u.slug === slug) || this.users[0];
-      document.cookie = `tv_tips_user=${slug}; path=/; max-age=31536000; SameSite=Lax`;
+      document.cookie = `tv_tipps_user=${slug}; path=/; max-age=31536000; SameSite=Lax`;
       this.recsData = null;
       this.recsMap = {};
       await this.loadLikes();
@@ -821,11 +821,11 @@ function tvApp() {
     setReceiver(name) {
       if (name === null) {
         this.selectedReceiver = null;
-        document.cookie = "tv_tips_receiver=; path=/; max-age=0; SameSite=Lax";
+        document.cookie = "tv_tipps_receiver=; path=/; max-age=0; SameSite=Lax";
       } else {
         this.selectedReceiver = this.receivers.find(r => r.name === name) || null;
         if (this.selectedReceiver)
-          document.cookie = `tv_tips_receiver=${name}; path=/; max-age=31536000; SameSite=Lax`;
+          document.cookie = `tv_tipps_receiver=${name}; path=/; max-age=31536000; SameSite=Lax`;
       }
       // Timers are per-receiver — refresh so badges reflect the new target.
       this.timersMap = {};

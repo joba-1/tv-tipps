@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# deploy.sh — install tv-tips as a systemd service
+# deploy.sh — install tv-tipps as a systemd service
 #
 # Usage: sudo ./deploy.sh [--prefix DIR] [--port PORT] [--user USER]
 #   --prefix DIR   install root (default: /usr/local)
@@ -7,10 +7,10 @@
 #   --user   USER  service user    (default: current user)
 #
 # Layout after install:
-#   $PREFIX/lib/tv-tips/   — app code + venv
-#   /etc/tv-tips/env       — environment / config file (created once)
-#   /var/lib/tv-tips/      — runtime data (SQLite DB)
-#   /etc/systemd/system/tv-tips.service
+#   $PREFIX/lib/tv-tipps/   — app code + venv
+#   /etc/tv-tipps/env       — environment / config file (created once)
+#   /var/lib/tv-tipps/      — runtime data (SQLite DB)
+#   /etc/systemd/system/tv-tipps.service
 
 set -euo pipefail
 
@@ -32,11 +32,11 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
-APP_DIR="$PREFIX/lib/tv-tips"
-DATA_DIR="/var/lib/tv-tips"
-CONF_DIR="/etc/tv-tips"
+APP_DIR="$PREFIX/lib/tv-tipps"
+DATA_DIR="/var/lib/tv-tipps"
+CONF_DIR="/etc/tv-tipps"
 ENV_FILE="$CONF_DIR/env"
-SERVICE_FILE="/etc/systemd/system/tv-tips.service"
+SERVICE_FILE="/etc/systemd/system/tv-tipps.service"
 VERSION=$(cat VERSION 2>/dev/null || echo "?")
 SCRIPT_DIR=$(cd "$(dirname "$0")" && pwd)
 
@@ -46,7 +46,7 @@ if [[ $EUID -ne 0 ]]; then
     exit 1
 fi
 
-echo "==> tv-tips v${VERSION} deploy"
+echo "==> tv-tipps v${VERSION} deploy"
 echo "    prefix : $APP_DIR"
 echo "    port   : $PORT"
 echo "    user   : $SERVICE_USER"
@@ -82,13 +82,28 @@ sudo -u "$SERVICE_USER" "$APP_DIR/.venv/bin/pip" install -q -r "$APP_DIR/require
 echo "--> Creating data directory …"
 install -d -o "$SERVICE_USER" "$DATA_DIR"
 
+# ── one-time migration from legacy tv-tips install ───────────────────────────
+LEGACY_DATA="/var/lib/tv-tips"
+LEGACY_DB="$LEGACY_DATA/tv_tips.db"
+NEW_DB="$DATA_DIR/tv_tipps.db"
+if [[ -f "$LEGACY_DB" && ! -f "$NEW_DB" ]]; then
+    echo "--> Migrating legacy DB from $LEGACY_DB → $NEW_DB"
+    systemctl stop tv-tips 2>/dev/null || true
+    cp -a "$LEGACY_DB" "$NEW_DB"
+    [[ -f "$LEGACY_DB-shm" ]] && cp -a "$LEGACY_DB-shm" "$NEW_DB-shm" || true
+    [[ -f "$LEGACY_DB-wal" ]] && cp -a "$LEGACY_DB-wal" "$NEW_DB-wal" || true
+    chown -R "$SERVICE_USER:" "$DATA_DIR"
+    echo "    (legacy install at /etc/tv-tips + /var/lib/tv-tips kept intact;"
+    echo "     remove with: sudo ./undeploy.sh --legacy --purge-db)"
+fi
+
 # ── env / config file (created once, never overwritten) ───────────────────────
 install -d "$CONF_DIR"
 if [[ ! -f "$ENV_FILE" ]]; then
     echo "--> Creating config file $ENV_FILE …"
     cat > "$ENV_FILE" <<EOF
-# tv-tips configuration — edit before starting the service
-# Restart the service after changes: systemctl restart tv-tips
+# tv-tipps configuration — edit before starting the service
+# Restart the service after changes: systemctl restart tv-tipps
 # Add receivers and users via the Admin page in the web UI.
 
 # ── Ollama ───────────────────────────────────────────────────────────────────
@@ -112,7 +127,7 @@ PRIME_END_HOUR=23
 #INTERTECHNO_DEVICE=1
 
 # ── Misc ─────────────────────────────────────────────────────────────────────
-DB_PATH=$DATA_DIR/tv_tips.db
+DB_PATH=$DATA_DIR/tv_tipps.db
 LOG_LEVEL=INFO
 MOCK_RECEIVERS=false
 EOF
@@ -126,7 +141,7 @@ else
         echo "WARNING: DB_PATH='$existing_db' is a relative path."
         echo "         The service WorkingDirectory is $APP_DIR, so the DB will be"
         echo "         created there, not in $DATA_DIR."
-        echo "         Fix: update DB_PATH=$DATA_DIR/tv_tips.db in $ENV_FILE"
+        echo "         Fix: update DB_PATH=$DATA_DIR/tv_tipps.db in $ENV_FILE"
     fi
 fi
 
@@ -134,7 +149,7 @@ fi
 echo "--> Installing systemd service …"
 cat > "$SERVICE_FILE" <<EOF
 [Unit]
-Description=tv-tips TV recommendation server
+Description=tv-tipps TV recommendation server
 After=network.target
 
 [Service]
@@ -151,12 +166,12 @@ WantedBy=multi-user.target
 EOF
 
 systemctl daemon-reload
-systemctl enable tv-tips
-systemctl restart tv-tips
+systemctl enable tv-tipps
+systemctl restart tv-tipps
 
 # ── success ───────────────────────────────────────────────────────────────────
 echo
-echo "✓ tv-tips v${VERSION} installed and started on port ${PORT}"
+echo "✓ tv-tipps v${VERSION} installed and started on port ${PORT}"
 echo
 echo "Next steps:"
 echo "  1. Edit config:   $ENV_FILE"
@@ -164,10 +179,10 @@ echo "     - Set OLLAMA_MODEL to a model you have pulled (ollama pull qwen3.5:9b
 echo "     - Adjust TIMEZONE to your local timezone"
 echo "     - Optionally set INTERTECHNO_URL if using an RF power switch"
 echo "  2. Restart after config changes:"
-echo "     sudo systemctl restart tv-tips"
+echo "     sudo systemctl restart tv-tipps"
 echo "  3. Open in browser:"
 echo "     http://$(hostname -I | awk '{print $1}'):${PORT}/"
 echo "  4. Check logs:"
-echo "     journalctl -u tv-tips -f"
+echo "     journalctl -u tv-tipps -f"
 echo "  5. Update later:"
 echo "     cd $SCRIPT_DIR && git pull && sudo ./deploy.sh --prefix $PREFIX --port $PORT --user $SERVICE_USER"

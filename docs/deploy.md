@@ -1,8 +1,8 @@
-# tv-tips — Admin & Deployment Guide
+# tv-tipps — Admin & Deployment Guide
 
 ## Overview
 
-tv-tips is a self-hosted FastAPI application that runs on the same local network as your Enigma2 satellite receivers (OpenWebif required).
+tv-tipps is a self-hosted FastAPI application that runs on the same local network as your Enigma2 satellite receivers (OpenWebif required).
 It collects viewing sessions, builds per-user preference profiles, and serves AI-ranked TV recommendations via a browser UI.
 
 **Stack**: Python 3.11+ · FastAPI · SQLite · APScheduler · Ollama (local LLM)
@@ -27,8 +27,8 @@ Any model that can produce reliable JSON output works; larger models give better
 ## Quick install (recommended)
 
 ```bash
-git clone https://github.com/joba-1/tv-tips.git
-cd tv-tips
+git clone https://github.com/joba-1/tv-tipps.git
+cd tv-tipps
 sudo ./deploy.sh
 ```
 
@@ -42,7 +42,7 @@ sudo ./deploy.sh [--prefix DIR] [--port PORT] [--user USER]
 
 | Option | Default | Description |
 |--------|---------|-------------|
-| `--prefix DIR` | `/usr/local` | Install root; app lands in `$PREFIX/lib/tv-tips/` |
+| `--prefix DIR` | `/usr/local` | Install root; app lands in `$PREFIX/lib/tv-tipps/` |
 | `--port PORT` | `8844` | Listening port |
 | `--user USER` | current sudo user | OS user that owns and runs the service |
 
@@ -54,22 +54,22 @@ sudo ./deploy.sh --prefix /opt --port 8765 --user myuser
 
 ### What the script does
 
-1. Copies app files to `$PREFIX/lib/tv-tips/` (rsync, skips `.git`, `.env`, DB files)
-2. Creates a Python venv at `$PREFIX/lib/tv-tips/.venv/` and installs `requirements.txt`
-3. Creates `/var/lib/tv-tips/` for the SQLite database
-4. Creates `/etc/tv-tips/env` (config file) — **written once, never overwritten on re-deploy**
-5. Installs `/etc/systemd/system/tv-tips.service` and starts the service
+1. Copies app files to `$PREFIX/lib/tv-tipps/` (rsync, skips `.git`, `.env`, DB files)
+2. Creates a Python venv at `$PREFIX/lib/tv-tipps/.venv/` and installs `requirements.txt`
+3. Creates `/var/lib/tv-tipps/` for the SQLite database
+4. Creates `/etc/tv-tipps/env` (config file) — **written once, never overwritten on re-deploy**
+5. Installs `/etc/systemd/system/tv-tipps.service` and starts the service
 
 ### After install
 
-1. Edit `/etc/tv-tips/env` — set your receiver IPs, usernames, and Ollama model
-2. `sudo systemctl restart tv-tips`
+1. Edit `/etc/tv-tipps/env` — set your receiver IPs, usernames, and Ollama model
+2. `sudo systemctl restart tv-tipps`
 3. Open `http://<host>:8844/`
 
 ### Updating
 
 ```bash
-cd tv-tips
+cd tv-tipps
 git pull
 sudo ./deploy.sh   # same options as initial install
 ```
@@ -81,8 +81,8 @@ The deploy script is idempotent: it upgrades the app and venv but never touches 
 ## Manual installation
 
 ```bash
-git clone https://github.com/joba-1/tv-tips.git
-cd tv-tips
+git clone https://github.com/joba-1/tv-tipps.git
+cd tv-tipps
 
 python3 -m venv .venv
 source .venv/bin/activate
@@ -95,7 +95,7 @@ cp /dev/null .env   # create empty, then edit
 
 ## Configuration
 
-The config file is `/etc/tv-tips/env` (deploy script) or `.env` in the working directory (manual).
+The config file is `/etc/tv-tipps/env` (deploy script) or `.env` in the working directory (manual).
 
 ### Full reference
 
@@ -107,7 +107,7 @@ The config file is `/etc/tv-tips/env` (deploy script) or `.env` in the working d
 #        wol_mac=<MAC>    enables Wake-on-LAN (power_method=wol)
 #        power_method=wol|intertechno|none
 #        location=<room>  human-readable label shown in watch toasts
-RECEIVERS_RAW=box15:192.168.1.15:alice|priority=2|wol_mac=00:1d:ec:17:0e:a1|power_method=wol|location=Wohnzimmer,\
+RECEIVERS_RAW=box15:192.168.1.15:alice|priority=2|wol_mac=aa:bb:cc:dd:ee:ff|power_method=wol|location=Wohnzimmer,\
               box17:192.168.1.17:bob|priority=1|has_genre=true|power_method=intertechno|location=Schlafzimmer
 
 # ── Users ────────────────────────────────────────────────────────────────────
@@ -136,7 +136,7 @@ INTERTECHNO_FAMILY=A
 INTERTECHNO_DEVICE=1
 
 # ── Misc ─────────────────────────────────────────────────────────────────────
-DB_PATH=/var/lib/tv-tips/tv_tips.db
+DB_PATH=/var/lib/tv-tipps/tv_tipps.db
 LOG_LEVEL=INFO
 MOCK_RECEIVERS=false
 SSH_ENABLED=false
@@ -158,24 +158,24 @@ uvicorn main:app --host 0.0.0.0 --port 8765 --reload
 ### Production (systemd — installed by deploy.sh)
 
 ```bash
-sudo systemctl status tv-tips
-sudo systemctl restart tv-tips
-journalctl -u tv-tips -f
+sudo systemctl status tv-tipps
+sudo systemctl restart tv-tipps
+journalctl -u tv-tipps -f
 ```
 
-Manual service file at `/etc/systemd/system/tv-tips.service`:
+Manual service file at `/etc/systemd/system/tv-tipps.service`:
 
 ```ini
 [Unit]
-Description=tv-tips TV recommendation server
+Description=tv-tipps TV recommendation server
 After=network.target
 
 [Service]
 Type=simple
 User=myuser
-WorkingDirectory=/usr/local/lib/tv-tips
-EnvironmentFile=/etc/tv-tips/env
-ExecStart=/usr/local/lib/tv-tips/.venv/bin/uvicorn main:app --host 0.0.0.0 --port 8844
+WorkingDirectory=/usr/local/lib/tv-tipps
+EnvironmentFile=/etc/tv-tipps/env
+ExecStart=/usr/local/lib/tv-tipps/.venv/bin/uvicorn main:app --host 0.0.0.0 --port 8844
 Restart=on-failure
 RestartSec=5
 
@@ -241,13 +241,13 @@ Recommendations fall back to a rule-based ranking if Ollama is unreachable.
 
 ## Database
 
-SQLite file at `DB_PATH` (default `/var/lib/tv-tips/tv_tips.db` when using deploy.sh).
+SQLite file at `DB_PATH` (default `/var/lib/tv-tipps/tv_tipps.db` when using deploy.sh).
 The schema is created automatically on first start — no manual migrations needed.
 
 ### Useful queries
 
 ```bash
-sqlite3 /var/lib/tv-tips/tv_tips.db
+sqlite3 /var/lib/tv-tipps/tv_tipps.db
 
 # Confirmed viewing sessions per user
 SELECT u.name, COUNT(*) FROM viewing_sessions vs
@@ -268,7 +268,7 @@ JOIN users u ON l.user_id = u.id GROUP BY u.name;
 ### Backup
 
 ```bash
-sqlite3 /var/lib/tv-tips/tv_tips.db ".backup tv_tips_backup.db"
+sqlite3 /var/lib/tv-tipps/tv_tipps.db ".backup tv_tipps_backup.db"
 ```
 
 ---
@@ -360,7 +360,7 @@ Interactive API docs: `http://<server>:<port>/docs`
 ## Updating
 
 ```bash
-cd tv-tips
+cd tv-tipps
 git pull
 sudo ./deploy.sh   # re-runs with same options; never overwrites config
 ```
@@ -384,7 +384,7 @@ Check the version: `cat VERSION`
 Logs (structured JSON):
 
 ```bash
-journalctl -u tv-tips -f | python3 -m json.tool
+journalctl -u tv-tipps -f | python3 -m json.tool
 ```
 
 ---

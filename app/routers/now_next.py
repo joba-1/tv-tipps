@@ -10,13 +10,13 @@ router = APIRouter()
 
 @router.get("/api/now-next", response_model=list[NowNextOut])
 def now_next(
-    tv_tips_user: str | None = Cookie(default=None),
+    tv_tipps_user: str | None = Cookie(default=None),
     db: Session = Depends(get_db),
 ):
     from app.models import User
     user_id = None
-    if tv_tips_user:
-        user = db.query(User).filter_by(slug=tv_tips_user).first()
+    if tv_tipps_user:
+        user = db.query(User).filter_by(slug=tv_tipps_user).first()
         if user:
             user_id = user.id
 

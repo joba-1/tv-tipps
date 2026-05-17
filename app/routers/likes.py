@@ -23,10 +23,10 @@ def _current_user(slug: str | None, db: Session) -> User | None:
 
 @router.get("/api/likes")
 def list_likes(
-    tv_tips_user: str | None = Cookie(default=None),
+    tv_tipps_user: str | None = Cookie(default=None),
     db: Session = Depends(get_db),
 ):
-    user = _current_user(tv_tips_user, db)
+    user = _current_user(tv_tipps_user, db)
     if not user:
         return []
     rows = (
@@ -52,10 +52,10 @@ def list_likes(
 @router.post("/api/likes/toggle")
 def toggle_like(
     req: LikeToggleRequest,
-    tv_tips_user: str | None = Cookie(default=None),
+    tv_tipps_user: str | None = Cookie(default=None),
     db: Session = Depends(get_db),
 ):
-    user = _current_user(tv_tips_user, db)
+    user = _current_user(tv_tipps_user, db)
     if not user:
         raise HTTPException(401, "No user cookie set")
     if req.sentiment not in ("like", "dislike"):

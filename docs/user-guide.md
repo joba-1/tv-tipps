@@ -1,6 +1,6 @@
-# tv-tips — User Guide
+# tv-tipps — User Guide
 
-tv-tips is a personal TV recommendation app for satellite receivers.
+tv-tipps is a personal TV recommendation app for satellite receivers.
 It learns your viewing habits and surfaces the programmes you are most likely to enjoy — ranked and ready to watch with one tap.
 
 ---

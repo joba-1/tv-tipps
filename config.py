@@ -52,7 +52,7 @@ class Settings(BaseSettings):
 
     ssh_enabled: bool = False
     mock_receivers: bool = False
-    db_path: str = "tv_tips.db"
+    db_path: str = "tv_tipps.db"
     log_level: str = "INFO"
 
     @property
