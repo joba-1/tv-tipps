@@ -696,8 +696,21 @@ async def get_recommendations(
                 age_min = (now - cached.generated_at).total_seconds() / 60
                 log.info("recs.serving_stale",
                          user_id=user_id, context=context, age_min=round(age_min, 1))
+                data["regenerating"] = True
                 asyncio.create_task(_regen_in_background(user_id, user_name, context))
-            return _realtime_adjust_now(data)
+            adjusted = _realtime_adjust_now(data)
+            # For "now": if the realtime filter drained everything (cached events
+            # all ended), fall through to a fresh rule-based snapshot so the user
+            # sees current candidates immediately while the LLM regen finishes.
+            if context == "now" and not adjusted.get("recommendations"):
+                log.info("recs.now_cache_drained",
+                         user_id=user_id, age_min=round((now - cached.generated_at).total_seconds() / 60, 1))
+                if not is_fresh:
+                    pass  # regen already scheduled above
+                else:
+                    asyncio.create_task(_regen_in_background(user_id, user_name, context))
+            else:
+                return adjusted
 
     # No cache for this user×context yet — build the rule-based slate first so
     # the user has something to look at immediately; queue the LLM in background.
