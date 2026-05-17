@@ -127,6 +127,21 @@ def delete_user(slug: str, db: Session = Depends(get_db)):
     return {"ok": True, "slug": slug}
 
 
+# ── Ollama usage stats ────────────────────────────────────────────────────────
+
+@router.get("/api/admin/ollama-stats")
+async def ollama_stats():
+    from app.services.ollama import get_stats
+    return get_stats()
+
+
+@router.post("/api/admin/ollama-stats/reset")
+async def ollama_stats_reset():
+    from app.services.ollama import reset_stats
+    reset_stats()
+    return {"ok": True}
+
+
 # ── Admin status ──────────────────────────────────────────────────────────────
 
 @router.get("/api/admin/status", response_model=AdminStatus)

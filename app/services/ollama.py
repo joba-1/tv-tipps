@@ -1,6 +1,8 @@
 """Thin async wrapper around the local Ollama /api/generate endpoint."""
 from __future__ import annotations
 import json
+import threading
+from collections import defaultdict
 import httpx
 from app.logging_setup import get_logger
 from config import settings
@@ -13,15 +15,101 @@ _TIMEOUT = httpx.Timeout(240.0)
 # temperature=0.2 → still mostly deterministic on strong signals, lets ties between
 #                   similar-strength candidates break differently across calls.
 # num_ctx=16384  → fits the largest prompts ("today" with 100 candidates + history).
-_OPTIONS = {"num_ctx": 16384, "temperature": 0.2}
+_NUM_CTX = 16384
+_OPTIONS = {"num_ctx": _NUM_CTX, "temperature": 0.2}
 
 
-async def ask_json(prompt: str) -> dict | str | None:
+# ── Usage stats ──────────────────────────────────────────────────────────────
+# Per-caller running counters for prompt + completion tokens reported by Ollama.
+# Reset on process restart; query via /api/admin/ollama-stats.
+
+class _Acc:
+    __slots__ = ("count", "sum", "min", "max")
+
+    def __init__(self) -> None:
+        self.count = 0
+        self.sum = 0
+        self.min = 0
+        self.max = 0
+
+    def add(self, v: int) -> None:
+        if v <= 0:
+            return
+        self.count += 1
+        self.sum += v
+        self.min = v if self.min == 0 else min(self.min, v)
+        self.max = max(self.max, v)
+
+    def as_dict(self) -> dict:
+        avg = (self.sum / self.count) if self.count else 0
+        return {"count": self.count, "sum": self.sum, "min": self.min,
+                "max": self.max, "avg": round(avg, 1)}
+
+
+_stats_lock = threading.Lock()
+_prompt_stats: dict[str, _Acc] = defaultdict(_Acc)
+_completion_stats: dict[str, _Acc] = defaultdict(_Acc)
+
+
+def _record(caller: str, prompt_tokens: int, completion_tokens: int, ctx: int) -> None:
+    with _stats_lock:
+        _prompt_stats[caller].add(prompt_tokens)
+        _completion_stats[caller].add(completion_tokens)
+    pct = round(100.0 * prompt_tokens / ctx, 1) if ctx else 0
+    log.info("ollama.usage", caller=caller, model=settings.ollama_model,
+             prompt_tokens=prompt_tokens, completion_tokens=completion_tokens,
+             num_ctx=ctx, ctx_used_pct=pct)
+
+
+def get_stats() -> dict:
+    """Snapshot of token usage per caller since process start."""
+    with _stats_lock:
+        callers = sorted(set(_prompt_stats) | set(_completion_stats))
+        per_caller = {}
+        total_p = _Acc()
+        total_c = _Acc()
+        for c in callers:
+            per_caller[c] = {
+                "prompt": _prompt_stats[c].as_dict(),
+                "completion": _completion_stats[c].as_dict(),
+            }
+            # Aggregate totals by replaying the running stats. We can't recover
+            # per-call values, so totals show the union of min/max and summed counts.
+            p = _prompt_stats[c]
+            t = _completion_stats[c]
+            if p.count:
+                total_p.count += p.count
+                total_p.sum += p.sum
+                total_p.min = p.min if total_p.min == 0 else min(total_p.min, p.min)
+                total_p.max = max(total_p.max, p.max)
+            if t.count:
+                total_c.count += t.count
+                total_c.sum += t.sum
+                total_c.min = t.min if total_c.min == 0 else min(total_c.min, t.min)
+                total_c.max = max(total_c.max, t.max)
+        return {
+            "model": settings.ollama_model,
+            "num_ctx": _NUM_CTX,
+            "per_caller": per_caller,
+            "total": {"prompt": total_p.as_dict(), "completion": total_c.as_dict()},
+        }
+
+
+def reset_stats() -> None:
+    with _stats_lock:
+        _prompt_stats.clear()
+        _completion_stats.clear()
+
+
+# ── Client ───────────────────────────────────────────────────────────────────
+
+async def ask_json(prompt: str, caller: str = "unknown") -> dict | str | None:
     """POST prompt to Ollama. Returns:
       - dict: parsed JSON object
       - str:  raw text response when JSON parse fails (caller may salvage)
       - None: transport/HTTP failure
     Retries once on parse failure with a corrective hint.
+    `caller` tags the call for the usage-stats endpoint (e.g. "recs", "i18n").
     """
     payload: dict = {
         "model": settings.ollama_model,
@@ -40,21 +128,29 @@ async def ask_json(prompt: str) -> dict | str | None:
                 r = await client.post(f"{settings.ollama_url}/api/generate", json=payload)
                 r.raise_for_status()
                 body = r.json()
+                # Thinking models (e.g. qwen3.5) with format=json emit the JSON
+                # into `thinking` and leave `response` empty. Fall back to it.
                 raw = (body.get("response") or "").strip()
+                if not raw:
+                    raw = (body.get("thinking") or "").strip()
                 last_raw = raw
+                _record(caller,
+                        int(body.get("prompt_eval_count") or 0),
+                        int(body.get("eval_count") or 0),
+                        _NUM_CTX)
                 # Extract JSON object/array from response (strip any surrounding prose)
                 import re as _re
                 m = _re.search(r'\{.*\}', raw, _re.DOTALL)
                 candidate = m.group(0) if m else raw
                 result = json.loads(candidate)
-                log.info("ollama.ok", model=settings.ollama_model, attempt=attempt)
+                log.info("ollama.ok", model=settings.ollama_model, attempt=attempt, caller=caller)
                 return result
         except (httpx.RequestError, httpx.HTTPStatusError) as e:
-            log.warning("ollama.request_failed", attempt=attempt, error=str(e))
+            log.warning("ollama.request_failed", attempt=attempt, error=str(e), caller=caller)
             return None
         except (json.JSONDecodeError, ValueError) as e:
             log.warning("ollama.parse_failed", attempt=attempt, error=str(e),
-                        raw_snippet=raw[:400])
+                        raw_snippet=raw[:400], caller=caller)
             if attempt == 0:
                 payload["prompt"] = (
                     prompt

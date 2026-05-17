@@ -498,7 +498,7 @@ async def _try_ollama_single_batch(
     else:
         log.info("recs.prompt_size", est_tokens=est, candidates=len(candidates))
 
-    raw = await ask_json(prompt)
+    raw = await ask_json(prompt, caller="recs")
     if raw is None:
         log.warning("recommendations.bad_llm_response", raw_type="None", keys=None)
         return None
