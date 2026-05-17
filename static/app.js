@@ -68,6 +68,7 @@ function tvApp() {
     activity: {},        // slug → { sessions: [...], likes: [...] }
     activityOpen: {},    // slug → bool (details expanded)
     activityLoading: {}, // slug → bool
+    unattributed: [],    // confirmed sessions with no user assigned
     newReceiver: { name: "", ip: "", location: "", priority: 99, power_method: "none", wol_mac: "", intertechno_family: "", intertechno_device: 1, has_genre: false },
     newUser: { slug: "", name: "" },
 
@@ -148,7 +149,7 @@ function tvApp() {
         if (this.page === "epg")    { this.loadEpg();     this.loadRecsMap(); this.loadTimers(); }
         if (this.page === "now")    { this.loadNowNext(); this.loadRecsMap(); this.loadTimers(); }
         if (this.page === "recs")   { this.loadRecs();    this.loadTimers(); }
-        if (this.page === "admin")  this.loadAdminStatus();
+        if (this.page === "admin") { this.loadAdminStatus(); this.loadUnattributed(); }
         if (this.page === "remote") this._startScreenshotPoll();
       };
       window.addEventListener("hashchange", route);
@@ -636,8 +637,41 @@ function tvApp() {
       if (!confirm(this.t("msg.confirm_delete_session") || "Sitzung löschen?")) return;
       const res = await fetch(`/api/admin/sessions/${id}`, { method: "DELETE" });
       if (res.ok) {
-        await this.loadActivity(slug);
+        if (slug) await this.loadActivity(slug);
+        await this.loadUnattributed();
         if (this.recsData) this.recsData = null;
+      }
+    },
+
+    async loadUnattributed() {
+      try {
+        const res = await fetch("/api/admin/unattributed-sessions");
+        if (res.ok) this.unattributed = (await res.json()).sessions || [];
+      } catch (_) { /* non-fatal */ }
+    },
+
+    async assignSession(id, slug) {
+      if (!slug) return;
+      const res = await fetch(`/api/admin/sessions/${id}/assign`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ user: slug }),
+      });
+      if (res.ok) {
+        await this.loadUnattributed();
+        if (this.activity[slug]) await this.loadActivity(slug);
+        if (this.recsData) this.recsData = null;
+      }
+    },
+
+    async setDefaultUser(receiverName, slug) {
+      const res = await fetch(`/api/admin/receivers/${encodeURIComponent(receiverName)}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ default_user: slug }),
+      });
+      if (res.ok) {
+        await this.loadAdminStatus();
       }
     },
 

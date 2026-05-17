@@ -405,6 +405,10 @@ nav details ul a {
 .admin-activity-list .admin-activity-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .admin-activity-list small { opacity: 0.7; font-size: 0.8rem; flex-shrink: 0; }
 .admin-activity-list button { margin: 0; padding: 0.15rem 0.5rem; font-size: 0.8rem; flex-shrink: 0; }
+.admin-activity-list select { margin: 0; padding: 0.15rem 0.4rem; font-size: 0.8rem; flex-shrink: 0; width: auto; }
+.admin-receiver-defuser { display: flex; align-items: center; gap: 0.5rem; margin-top: 0.25rem; }
+.admin-receiver-defuser small { opacity: 0.7; }
+.admin-receiver-defuser select { margin: 0; padding: 0.15rem 0.4rem; width: auto; font-size: 0.85rem; }
 
 .epg-search-input {
   width: 100%;

@@ -1,10 +1,11 @@
 """Remote control: zap to channel with automatic receiver wake if needed."""
 from __future__ import annotations
 import asyncio
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Cookie, HTTPException
 from fastapi.responses import Response
 from pydantic import BaseModel
 from app.logging_setup import get_logger
+from app.services.active_viewer import record_active
 from config import settings
 
 log = get_logger(__name__)
@@ -65,7 +66,7 @@ async def _find_receiver(preferred_name: str | None):
 
 
 @router.post("/api/remote/zap")
-async def zap_to_channel(req: ZapRequest):
+async def zap_to_channel(req: ZapRequest, tv_tipps_user: str | None = Cookie(default=None)):
     from app.enigma.client import EnigmaClient
     from app.services.power import wake_receiver
 
@@ -100,18 +101,22 @@ async def zap_to_channel(req: ZapRequest):
         woke = True
 
     ok = await client.zap(req.sref)
-    log.info("remote.zap", receiver=rcfg.name, sref=req.sref, ok=ok)
+    if ok:
+        record_active(rcfg.name, tv_tipps_user)
+    log.info("remote.zap", receiver=rcfg.name, sref=req.sref, user=tv_tipps_user, ok=ok)
     return {"ok": ok, "receiver_name": rcfg.name, "receiver_location": rcfg.location or rcfg.name, "sref": req.sref, "woke": woke}
 
 
 @router.post("/api/remote/key")
-async def send_key(req: KeyRequest):
+async def send_key(req: KeyRequest, tv_tipps_user: str | None = Cookie(default=None)):
     """Send a single RC key press to the best available (or specified) receiver."""
     rcfg, client = await _find_receiver(req.receiver)
     if rcfg is None:
         raise HTTPException(503, "No receiver available")
     ok = await client.send_key(req.key)
-    log.info("remote.key", receiver=rcfg.name, key=req.key, ok=ok)
+    if ok:
+        record_active(rcfg.name, tv_tipps_user)
+    log.info("remote.key", receiver=rcfg.name, key=req.key, user=tv_tipps_user, ok=ok)
     return {"ok": ok, "receiver_name": rcfg.name}
 
 
@@ -145,7 +150,7 @@ async def remove_timer(req: TimerRemoveRequest):
 
 
 @router.post("/api/remote/record")
-async def add_record_timer(req: TimerRequest):
+async def add_record_timer(req: TimerRequest, tv_tipps_user: str | None = Cookie(default=None)):
     """Program a recording timer on the receiver for the given event."""
     from datetime import datetime, timezone
     rcfg, client = await _find_receiver(req.receiver)
@@ -196,9 +201,11 @@ async def add_record_timer(req: TimerRequest):
                 msg = msg or "timer already present"
                 break
 
+    if ok:
+        record_active(rcfg.name, tv_tipps_user)
     log.info("remote.record",
              receiver=rcfg.name, sref=req.sref, title=req.title,
-             eit=req.event_id, ok=ok, owif_message=msg)
+             eit=req.event_id, user=tv_tipps_user, ok=ok, owif_message=msg)
     return {
         "ok": ok,
         "message": msg,

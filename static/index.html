@@ -277,6 +277,15 @@
               <span x-text="t('label.prio', { n: r.priority })" class="flag-badge"></span>
               <span x-text="r.power_method" class="flag-badge"></span>
             </div>
+            <label class="admin-receiver-defuser">
+              <small x-text="t('label.receiver_default_user')"></small>
+              <select @change="setDefaultUser(r.name, $event.target.value)">
+                <option value="" :selected="!r.default_user">—</option>
+                <template x-for="u in users" :key="u.slug">
+                  <option :value="u.slug" :selected="r.default_user === u.slug" x-text="u.name"></option>
+                </template>
+              </select>
+            </label>
             <footer>
               <button class="outline" @click="receiverPower(r.name, 'wake')"
                       x-show="r.power_method !== 'none'"
@@ -367,6 +376,29 @@
                   :disabled="prefsSaving === u.slug || !prefsChanged(u.slug)" x-text="t('btn.prefs_save')"></button>
         </div>
       </template>
+    </div>
+
+    <!-- Unattributed confirmed sessions — admin must label them by hand -->
+    <div class="admin-section" x-show="unattributed.length > 0">
+      <h3 x-text="t('label.unattributed_heading')"></h3>
+      <p><small x-text="t('label.unattributed_hint')"></small></p>
+      <ul class="admin-activity-list">
+        <template x-for="s in unattributed" :key="s.id">
+          <li>
+            <span class="admin-activity-title" x-text="s.title"></span>
+            <small x-text="(s.channel_name || '?') + ' · ' + (s.receiver_name || '?') + ' · ' + formatDate(s.started_at) + ' · ' + Math.round((s.duration_sec||0)/60) + 'min'"></small>
+            <select @change="assignSession(s.id, $event.target.value); $event.target.value=''">
+              <option value="" x-text="t('label.assign_to')"></option>
+              <template x-for="u in users" :key="u.slug">
+                <option :value="u.slug" x-text="u.name"></option>
+              </template>
+            </select>
+            <button class="outline secondary admin-delete-btn"
+                    @click="deleteSession(null, s.id)"
+                    x-text="t('btn.delete')"></button>
+          </li>
+        </template>
+      </ul>
     </div>
 
     <!-- Viewing history + likes/dislikes (influence match score) -->

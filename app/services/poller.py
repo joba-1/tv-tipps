@@ -143,9 +143,22 @@ def _confirm_session(state: dict, receiver: Receiver, db: Session) -> None:
         return
     session.confirmed = True
 
-    # Attribute to default user for this receiver
+    # Attribution priority:
+    #   1. active_viewer registry — a user-driven remote action (zap/key/timer)
+    #      on this receiver in the last 4h: high-confidence browser attribution.
+    #   2. receiver.default_user — IR remote fallback: who usually sits there.
     from app.models import User
-    if receiver.default_user:
+    from app.services.active_viewer import get_active
+    attributed = False
+    active_slug = get_active(receiver.name)
+    if active_slug:
+        user = db.query(User).filter_by(slug=active_slug).first()
+        if user:
+            session.user_id = user.id
+            session.confidence = 1.0
+            session.attribution_method = "browser_active"
+            attributed = True
+    if not attributed and receiver.default_user:
         user = db.query(User).filter_by(slug=receiver.default_user).first()
         if user:
             session.user_id = user.id
@@ -170,7 +183,8 @@ def _confirm_session(state: dict, receiver: Receiver, db: Session) -> None:
 
     state["confirmed"] = True
     log.info("poller.session_confirmed", session_id=state["session_id"],
-             receiver=receiver.name, user=receiver.default_user)
+             receiver=receiver.name, user_id=session.user_id,
+             attribution=session.attribution_method)
 
 
 def _close_session(state: dict, ended_at: datetime, db: Session) -> None:
@@ -320,8 +334,45 @@ def remove_poll_job(name: str) -> None:
         log.info("scheduler.poll_job_removed", receiver=name)
 
 
+def _close_orphan_sessions() -> None:
+    """Sessions with ended_at IS NULL from before a restart need closing —
+    the in-memory state that would have closed them is gone. Confirmed ones
+    keep their data with a best-effort end time; unconfirmed ones are
+    discarded (we have no way to know they crossed min_watch_sec)."""
+    from app.models import ViewingSession, Receiver
+    db = SessionLocal()
+    try:
+        orphans = (
+            db.query(ViewingSession)
+            .filter(ViewingSession.ended_at == None)  # noqa: E711
+            .all()
+        )
+        if not orphans:
+            return
+        receivers = {r.id: r for r in db.query(Receiver).all()}
+        kept = discarded = 0
+        min_dur = timedelta(seconds=settings.min_watch_sec)
+        for s in orphans:
+            if not s.confirmed:
+                db.delete(s)
+                discarded += 1
+                continue
+            rcv = receivers.get(s.receiver_id)
+            candidates = [s.started_at + min_dur]
+            if rcv and rcv.last_seen and rcv.last_seen > s.started_at:
+                candidates.append(rcv.last_seen)
+            s.ended_at = max(candidates)
+            s.duration_sec = int((s.ended_at - s.started_at).total_seconds())
+            kept += 1
+        db.commit()
+        log.info("poller.orphan_sweep", kept=kept, discarded=discarded)
+    finally:
+        db.close()
+
+
 def start_scheduler() -> None:
     """Register all jobs and start the scheduler."""
+    _close_orphan_sessions()
     from app.database import SessionLocal as _SL
     db = _SL()
     try:

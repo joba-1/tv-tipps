@@ -57,6 +57,7 @@ async def list_receivers(db: Session = Depends(get_db)):
             "wol_mac": rcfg.wol_mac,
             "intertechno_family": rcfg.intertechno_family,
             "intertechno_device": rcfg.intertechno_device,
+            "default_user": rcfg.default_user or None,
         })
     return result
 
@@ -78,6 +79,24 @@ def create_receiver(req: ReceiverCreateRequest, db: Session = Depends(get_db)):
     from app.services.poller import _add_poll_job
     _add_poll_job(req.name)
     return {"ok": True, "name": req.name}
+
+
+class ReceiverPatchRequest(BaseModel):
+    default_user: str | None = None  # "" or None to clear
+
+
+@router.patch("/api/admin/receivers/{name}")
+def update_receiver(name: str, req: ReceiverPatchRequest, db: Session = Depends(get_db)):
+    r = db.query(Receiver).filter_by(name=name).first()
+    if not r:
+        raise HTTPException(404, f"Receiver '{name}' not found")
+    if req.default_user is not None:
+        slug = req.default_user.strip() or None
+        if slug and not db.query(User).filter_by(slug=slug).first():
+            raise HTTPException(400, f"Unknown user '{slug}'")
+        r.default_user = slug or ""
+    db.commit()
+    return {"ok": True, "name": name, "default_user": r.default_user or None}
 
 
 @router.delete("/api/admin/receivers/{name}")
@@ -273,6 +292,69 @@ def get_user_activity(user: str, limit: int = 50, db: Session = Depends(get_db))
                 .all()]
 
     return {"user": user, "sessions": sessions, "likes": likes}
+
+
+@router.get("/api/admin/active-viewers")
+def active_viewers():
+    """Per-receiver browser user that drove the most recent remote action
+    (used for high-confidence session attribution). Expires after 4h."""
+    from app.services.active_viewer import snapshot
+    return snapshot()
+
+
+@router.get("/api/admin/unattributed-sessions")
+def list_unattributed_sessions(limit: int = 100, db: Session = Depends(get_db)):
+    """Confirmed viewing sessions without a user — visible to the recommender
+    only after an admin attributes them."""
+    from app.models import ViewingSession, EpgEvent, Channel, Receiver as RcvModel
+    rows = (
+        db.query(ViewingSession, EpgEvent, Channel, RcvModel)
+        .outerjoin(EpgEvent, ViewingSession.epg_event_id == EpgEvent.id)
+        .outerjoin(Channel, ViewingSession.channel_id == Channel.id)
+        .outerjoin(RcvModel, ViewingSession.receiver_id == RcvModel.id)
+        .filter(ViewingSession.user_id == None, ViewingSession.confirmed == True)  # noqa: E711, E712
+        .order_by(ViewingSession.started_at.desc())
+        .limit(limit)
+        .all()
+    )
+    return {"sessions": [{
+        "id": s.id,
+        "title": (ev.title if ev else None) or "(unknown)",
+        "channel_name": ch.name if ch else None,
+        "receiver_name": rc.name if rc else None,
+        "started_at": s.started_at.isoformat() if s.started_at else None,
+        "duration_sec": s.duration_sec,
+        "source": s.source,
+    } for s, ev, ch, rc in rows]}
+
+
+class SessionAssignRequest(BaseModel):
+    user: str  # slug, or "" to unassign
+
+
+@router.post("/api/admin/sessions/{session_id}/assign")
+def assign_session(session_id: int, req: SessionAssignRequest, db: Session = Depends(get_db)):
+    from app.models import ViewingSession, RecommendationCache
+    s = db.get(ViewingSession, session_id)
+    if not s:
+        raise HTTPException(404, "session not found")
+    slug = req.user.strip()
+    old_uid = s.user_id
+    if slug:
+        u = db.query(User).filter_by(slug=slug).first()
+        if not u:
+            raise HTTPException(400, f"Unknown user '{slug}'")
+        s.user_id = u.id
+        s.confidence = 1.0
+        s.attribution_method = "admin_manual"
+    else:
+        s.user_id = None
+        s.attribution_method = None
+    # Invalidate recs for both old and new owner so the next request re-ranks.
+    for uid in {old_uid, s.user_id} - {None}:
+        db.query(RecommendationCache).filter_by(user_id=uid).delete()
+    db.commit()
+    return {"ok": True, "id": session_id, "user_id": s.user_id}
 
 
 @router.delete("/api/admin/sessions/{session_id}")
