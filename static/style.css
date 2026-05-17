@@ -391,6 +391,21 @@ nav details ul a {
 }
 .admin-pref-row button { margin: 0; flex-shrink: 0; }
 
+.admin-activity { margin: 0.5rem 0; padding: 0.4rem 0.6rem; border: 1px solid var(--pico-muted-border-color); border-radius: 6px; }
+.admin-activity > summary { cursor: pointer; }
+.admin-activity > summary small { margin-left: 0.5rem; opacity: 0.7; }
+.admin-activity h4 { margin: 0.75rem 0 0.25rem; font-size: 0.9rem; opacity: 0.85; }
+.admin-activity-empty { font-size: 0.85rem; opacity: 0.6; margin: 0.25rem 0; }
+.admin-activity-list { list-style: none; padding: 0; margin: 0; }
+.admin-activity-list li {
+  display: flex; align-items: center; gap: 0.5rem; padding: 0.25rem 0;
+  border-bottom: 1px solid var(--pico-muted-border-color);
+}
+.admin-activity-list li:last-child { border-bottom: none; }
+.admin-activity-list .admin-activity-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.admin-activity-list small { opacity: 0.7; font-size: 0.8rem; flex-shrink: 0; }
+.admin-activity-list button { margin: 0; padding: 0.15rem 0.5rem; font-size: 0.8rem; flex-shrink: 0; }
+
 .epg-search-input {
   width: 100%;
   margin: 0 0 1rem;

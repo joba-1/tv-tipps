@@ -369,6 +369,55 @@
       </template>
     </div>
 
+    <!-- Viewing history + likes/dislikes (influence match score) -->
+    <div class="admin-section">
+      <h3 x-text="t('label.activity_heading')"></h3>
+      <template x-for="u in users" :key="u.slug">
+        <details class="admin-activity" :open="activityOpen[u.slug]" @toggle="if ($event.target.open && !activity[u.slug]) loadActivity(u.slug)">
+          <summary>
+            <strong x-text="u.name"></strong>
+            <small x-show="activity[u.slug]"
+                   x-text="t('label.activity_counts', { s: activity[u.slug].sessions.length, l: activity[u.slug].likes.length })"></small>
+          </summary>
+          <div x-show="activityLoading[u.slug]" aria-busy="true"></div>
+          <div x-show="activity[u.slug]">
+            <h4 x-text="t('label.activity_sessions')"></h4>
+            <div class="admin-activity-empty"
+                 x-show="activity[u.slug] && activity[u.slug].sessions.length === 0"
+                 x-text="t('label.activity_no_sessions')"></div>
+            <ul class="admin-activity-list">
+              <template x-for="s in (activity[u.slug] && activity[u.slug].sessions) || []" :key="s.id">
+                <li>
+                  <span class="admin-activity-title" x-text="s.title"></span>
+                  <small x-text="(s.channel_name || '?') + ' · ' + formatDate(s.started_at) + ' · ' + Math.round((s.duration_sec||0)/60) + 'min'"></small>
+                  <button class="outline secondary admin-delete-btn"
+                          @click="deleteSession(u.slug, s.id)"
+                          x-text="t('btn.delete')"></button>
+                </li>
+              </template>
+            </ul>
+
+            <h4 x-text="t('label.activity_likes')"></h4>
+            <div class="admin-activity-empty"
+                 x-show="activity[u.slug] && activity[u.slug].likes.length === 0"
+                 x-text="t('label.activity_no_likes')"></div>
+            <ul class="admin-activity-list">
+              <template x-for="l in (activity[u.slug] && activity[u.slug].likes) || []" :key="l.id">
+                <li>
+                  <span x-text="l.sentiment === 'dislike' ? '👎' : '👍'"></span>
+                  <span class="admin-activity-title" x-text="l.title"></span>
+                  <small x-text="(l.channel_name || '?') + (l.genre ? ' · ' + l.genre : '') + ' · ' + formatDate(l.created_at)"></small>
+                  <button class="outline secondary admin-delete-btn"
+                          @click="deleteLike(u.slug, l.id)"
+                          x-text="t('btn.delete')"></button>
+                </li>
+              </template>
+            </ul>
+          </div>
+        </details>
+      </template>
+    </div>
+
     <div class="admin-stats" x-show="adminStatus">
       <p x-text="t('label.admin_channels', { n: adminStatus && adminStatus.db_channel_count })"></p>
       <p x-text="t('label.admin_epg_events', { n: adminStatus && adminStatus.db_epg_event_count })"></p>

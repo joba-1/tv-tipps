@@ -231,6 +231,77 @@ def set_user_preferences(user: str, req: UserPreferencesRequest, db: Session = D
     return {"ok": True, "user": user}
 
 
+# ── User activity (sessions + likes/dislikes) ────────────────────────────────
+
+@router.get("/api/admin/user-activity")
+def get_user_activity(user: str, limit: int = 50, db: Session = Depends(get_db)):
+    """Recent confirmed viewing sessions + all likes/dislikes for one user.
+    Both shape the recommendation match score, so admins can prune outliers."""
+    from app.models import ViewingSession, UserLike, EpgEvent, Channel
+    u = db.query(User).filter_by(slug=user).first()
+    if not u:
+        raise HTTPException(404, f"unknown user '{user}'")
+
+    rows = (
+        db.query(ViewingSession, EpgEvent, Channel)
+        .outerjoin(EpgEvent, ViewingSession.epg_event_id == EpgEvent.id)
+        .outerjoin(Channel, ViewingSession.channel_id == Channel.id)
+        .filter(ViewingSession.user_id == u.id, ViewingSession.confirmed == True)  # noqa: E712
+        .order_by(ViewingSession.started_at.desc())
+        .limit(limit)
+        .all()
+    )
+    sessions = [{
+        "id": s.id,
+        "title": (ev.title if ev else None) or "(unknown)",
+        "channel_name": ch.name if ch else None,
+        "started_at": s.started_at.isoformat() if s.started_at else None,
+        "duration_sec": s.duration_sec,
+        "source": s.source,
+    } for s, ev, ch in rows]
+
+    likes = [{
+        "id": l.id,
+        "title": l.title,
+        "channel_name": l.channel_name,
+        "genre": l.genre,
+        "sentiment": l.sentiment,
+        "created_at": l.created_at.isoformat() if l.created_at else None,
+    } for l in db.query(UserLike)
+                .filter_by(user_id=u.id)
+                .order_by(UserLike.created_at.desc())
+                .all()]
+
+    return {"user": user, "sessions": sessions, "likes": likes}
+
+
+@router.delete("/api/admin/sessions/{session_id}")
+def delete_session(session_id: int, db: Session = Depends(get_db)):
+    from app.models import ViewingSession, RecommendationCache
+    s = db.get(ViewingSession, session_id)
+    if not s:
+        raise HTTPException(404, "session not found")
+    user_id = s.user_id
+    db.delete(s)
+    if user_id:
+        db.query(RecommendationCache).filter_by(user_id=user_id).delete()
+    db.commit()
+    return {"ok": True, "id": session_id}
+
+
+@router.delete("/api/admin/likes/{like_id}")
+def delete_like(like_id: int, db: Session = Depends(get_db)):
+    from app.models import UserLike, RecommendationCache
+    l = db.get(UserLike, like_id)
+    if not l:
+        raise HTTPException(404, "like not found")
+    user_id = l.user_id
+    db.delete(l)
+    db.query(RecommendationCache).filter_by(user_id=user_id).delete()
+    db.commit()
+    return {"ok": True, "id": like_id}
+
+
 # ── Power control ─────────────────────────────────────────────────────────────
 
 @router.post("/api/admin/power")

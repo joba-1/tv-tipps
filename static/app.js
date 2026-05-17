@@ -65,6 +65,9 @@ function tvApp() {
     prefsDraft: {},      // slug → current textarea value (editable)
     prefsSaved: {},      // slug → last saved value (for dirty detection)
     prefsSaving: null,   // slug currently being saved (disables button)
+    activity: {},        // slug → { sessions: [...], likes: [...] }
+    activityOpen: {},    // slug → bool (details expanded)
+    activityLoading: {}, // slug → bool
     newReceiver: { name: "", ip: "", location: "", priority: 99, power_method: "none", wol_mac: "", intertechno_family: "", intertechno_device: 1, has_genre: false },
     newUser: { slug: "", name: "" },
 
@@ -610,6 +613,43 @@ function tvApp() {
       }
     },
 
+    async toggleActivity(slug) {
+      this.activityOpen[slug] = !this.activityOpen[slug];
+      if (this.activityOpen[slug] && !this.activity[slug]) {
+        await this.loadActivity(slug);
+      }
+    },
+
+    async loadActivity(slug) {
+      this.activityLoading[slug] = true;
+      try {
+        const res = await fetch(`/api/admin/user-activity?user=${encodeURIComponent(slug)}`);
+        if (res.ok) this.activity[slug] = await res.json();
+      } catch (_) {
+        this.adminMsg = this.t("msg.activity_error") || "Aktivität konnte nicht geladen werden";
+      } finally {
+        this.activityLoading[slug] = false;
+      }
+    },
+
+    async deleteSession(slug, id) {
+      if (!confirm(this.t("msg.confirm_delete_session") || "Sitzung löschen?")) return;
+      const res = await fetch(`/api/admin/sessions/${id}`, { method: "DELETE" });
+      if (res.ok) {
+        await this.loadActivity(slug);
+        if (this.recsData) this.recsData = null;
+      }
+    },
+
+    async deleteLike(slug, id) {
+      if (!confirm(this.t("msg.confirm_delete_like") || "Reaktion löschen?")) return;
+      const res = await fetch(`/api/admin/likes/${id}`, { method: "DELETE" });
+      if (res.ok) {
+        await this.loadActivity(slug);
+        if (this.recsData) this.recsData = null;
+      }
+    },
+
     async adminRefresh(target) {
       this.adminRefreshing = true;
       this.adminMsg = "";
@@ -919,6 +959,12 @@ function tvApp() {
       const d = this._parseEventTime(isoStr);
       if (!d || isNaN(d.getTime())) return "";
       return d.toLocaleTimeString(this.lang, { hour: "2-digit", minute: "2-digit" });
+    },
+
+    formatDate(isoStr) {
+      const d = this._parseEventTime(isoStr);
+      if (!d || isNaN(d.getTime())) return "";
+      return d.toLocaleString(this.lang, { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" });
     },
 
     _getCookie(name) {
