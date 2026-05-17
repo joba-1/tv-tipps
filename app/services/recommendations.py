@@ -26,6 +26,10 @@ _MAJOR_CHANNELS = {
     "kabel eins", "kabel1", "vox", "rtl2", "rtl zwei",
 }
 _CACHE_TTL = {"now": 90, "next": 90, "prime": 120, "today": 360}
+# Trigger a background regen once a cached slate is this old even if still
+# fresh. Catches new shows that started after the cache was built — without it,
+# "now"/"next" would just slowly shed ended items until empty.
+_DRIFT_REGEN_MIN = {"now": 15, "next": 20, "prime": 60, "today": 120}
 
 
 def _progress_pct(ev: EpgEvent, now) -> float:
@@ -690,11 +694,18 @@ async def get_recommendations(
         )
         if cached:
             is_fresh = cached.valid_until > now
+            age_min = (now - cached.generated_at).total_seconds() / 60
             data = json.loads(cached.response)
             data["cached"] = True
             if not is_fresh:
-                age_min = (now - cached.generated_at).total_seconds() / 60
                 log.info("recs.serving_stale",
+                         user_id=user_id, context=context, age_min=round(age_min, 1))
+                data["regenerating"] = True
+                asyncio.create_task(_regen_in_background(user_id, user_name, context))
+            elif age_min >= _DRIFT_REGEN_MIN.get(context, 30):
+                # Still fresh, but the slate is old enough that newly-started
+                # shows would be missing — regen in background, keep serving.
+                log.info("recs.drift_regen",
                          user_id=user_id, context=context, age_min=round(age_min, 1))
                 data["regenerating"] = True
                 asyncio.create_task(_regen_in_background(user_id, user_name, context))
