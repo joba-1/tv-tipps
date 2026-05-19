@@ -102,27 +102,33 @@ nav details ul a {
   margin: 1rem 0;
   flex-wrap: wrap;
 }
-.page-header h2 { margin: 0; }
+.page-header h2 { margin: 0; font-size: 1rem; }
 .page-header small { color: var(--pico-muted-color); }
 .page-header button { margin: 0; }
 
+/* Subheader buttons + context dropdowns mimic the nav summary style:
+   primary-color text, no outline/fill, same 1rem size as the page title.
+   Pico applies form-element height + padding outside nav; reset both. */
 .context-dropdown { margin: 0; }
-.context-dropdown > summary {
-  padding: 0.5rem 1rem !important;
-  font-size: 0.85rem;
+.context-dropdown > summary,
+.page-header .refresh-btn,
+.page-header > button {
+  height: auto !important;
+  min-height: 0 !important;
+  padding: 0.1rem 0.5rem !important;
+  font-size: 1rem !important;
   line-height: 1.4 !important;
-  box-sizing: border-box !important;
+  box-sizing: content-box !important;
   color: var(--pico-primary) !important;
-  font-weight: 600;
+  font-weight: 600 !important;
   letter-spacing: 0.02em;
+  /* Same outlined form-element look as the nav summaries. */
+  background-color: var(--pico-form-element-background-color) !important;
+  border: var(--pico-border-width) solid var(--pico-form-element-border-color) !important;
+  border-radius: var(--pico-border-radius) !important;
+  box-shadow: none !important;
 }
 .context-dropdown ul a { color: var(--pico-primary) !important; font-weight: 600; letter-spacing: 0.02em; }
-.refresh-btn {
-  padding: 0.5rem 1rem !important;
-  font-size: 0.85rem;
-  line-height: 1.4 !important;
-  box-sizing: border-box !important;
-}
 
 /* ---- Unified event row — used by Tips, Now&Next, EPG ---- */
 .event-list {
