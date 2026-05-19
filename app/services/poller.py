@@ -11,6 +11,7 @@ from app.enigma.client import EnigmaClient
 from app.services.channels import refresh_channels
 from app.services.epg import refresh_now_next, cleanup_old_events
 from app.logging_setup import get_logger
+from app.timezones import utcnow
 from config import settings
 
 log = get_logger(__name__)
@@ -46,7 +47,7 @@ async def _poll_receiver(receiver_name: str) -> None:
         rcfg = _to_rcfg(receiver)
         client = EnigmaClient(rcfg.ip, mock=settings.mock_receivers)
         state = _get_state(receiver_name)
-        now = datetime.utcnow()
+        now = utcnow()
 
         # Check power state
         power = await client.get_power_state()
