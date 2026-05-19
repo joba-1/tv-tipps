@@ -27,5 +27,6 @@ def _to_rcfg(r: Receiver) -> ReceiverConfig:
         power_method=r.power_method or "none",
         intertechno_family=r.intertechno_family or "",
         intertechno_device=r.intertechno_device if r.intertechno_device is not None else 1,
+        intertechno_url=r.intertechno_url or "",
         location=r.location or "",
     )

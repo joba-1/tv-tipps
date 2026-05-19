@@ -297,6 +297,50 @@
               <button class="outline secondary admin-delete-btn" @click="deleteReceiver(r.name)"
                       x-text="t('btn.delete')"></button>
             </footer>
+
+            <details class="admin-edit-form" @toggle="if ($event.target.open) startEditReceiver(r)">
+              <summary x-text="t('label.edit_receiver')"></summary>
+              <div class="admin-add-fields" x-show="editReceiver.name === r.name">
+                <label><span x-text="t('label.receiver_ip')"></span>
+                  <input x-model="editReceiver.ip"></label>
+                <label><span x-text="t('label.receiver_location')"></span>
+                  <input x-model="editReceiver.location"></label>
+                <label><span x-text="t('label.receiver_priority')"></span>
+                  <input type="number" x-model.number="editReceiver.priority" min="1" max="99"></label>
+                <label><span x-text="t('label.receiver_power_method')"></span>
+                  <select x-model="editReceiver.power_method">
+                    <option value="none">none</option>
+                    <option value="wol">wol</option>
+                    <option value="intertechno">intertechno</option>
+                  </select>
+                </label>
+                <label x-show="editReceiver.power_method === 'wol'">
+                  <span x-text="t('label.receiver_wol_mac')"></span>
+                  <input x-model="editReceiver.wol_mac" placeholder="00:11:22:33:44:55">
+                </label>
+                <label x-show="editReceiver.power_method === 'intertechno'">
+                  <span x-text="t('label.receiver_intertechno_family')"></span>
+                  <select x-model="editReceiver.intertechno_family">
+                    <option value="">—</option>
+                    <option>A</option><option>B</option><option>C</option><option>D</option>
+                  </select>
+                </label>
+                <label x-show="editReceiver.power_method === 'intertechno'">
+                  <span x-text="t('label.receiver_intertechno_device')"></span>
+                  <select x-model.number="editReceiver.intertechno_device">
+                    <option value="1">1</option><option value="2">2</option><option value="3">3</option>
+                  </select>
+                </label>
+                <label x-show="editReceiver.power_method === 'intertechno'">
+                  <span x-text="t('label.receiver_intertechno_url')"></span>
+                  <input x-model="editReceiver.intertechno_url" placeholder="http://intertechnogw">
+                </label>
+                <label><span x-text="t('label.receiver_has_genre')"></span>
+                  <input type="checkbox" role="switch" x-model="editReceiver.has_genre">
+                </label>
+                <button @click="saveReceiver(r.name)" x-text="t('btn.save')"></button>
+              </div>
+            </details>
           </article>
         </template>
       </div>
@@ -329,6 +373,9 @@
             <select x-model.number="newReceiver.intertechno_device">
               <option value="1">1</option><option value="2">2</option><option value="3">3</option>
             </select>
+          </label>
+          <label x-show="newReceiver.power_method === 'intertechno'"><span x-text="t('label.receiver_intertechno_url')"></span>
+            <input x-model="newReceiver.intertechno_url" placeholder="http://intertechnogw">
           </label>
           <label><span x-text="t('label.receiver_has_genre')"></span>
             <input type="checkbox" role="switch" x-model="newReceiver.has_genre">
@@ -573,10 +620,10 @@
   </main>
 
   <!-- Programme detail modal -->
-  <dialog :open="modalOpen" @click.self="modalOpen=false">
+  <dialog :open="modalOpen" @click.self="closeModal()">
     <article>
       <header>
-        <button class="close" @click="modalOpen=false"
+        <button class="close" @click="closeModal()"
                 :aria-label="t('btn.close')">✕</button>
         <strong x-text="modalChannel"></strong>
       </header>
@@ -593,12 +640,12 @@
         <button :class="dislikedIds.has(modalEvent?.id) ? 'dislike-btn disliked' : 'dislike-btn outline'"
                 @click="toggleDislike(modalEvent?.id)"
                 x-text="dislikedIds.has(modalEvent?.id) ? t('btn.undislike') : t('btn.dislike')"></button>
-        <button x-show="modalSref && modalIsLive" class="watch-btn" @click="watchChannel(modalSref); modalOpen=false"
+        <button x-show="modalSref && modalIsLive" class="watch-btn" @click="watchChannel(modalSref); closeModal()"
                 x-text="t('btn.watch')"></button>
         <button x-show="canRecord() && !findTimer(modalEvent)" class="record-btn"
-                @click="recordEvent(); modalOpen=false" x-text="t('btn.record')"></button>
+                @click="recordEvent(); closeModal()" x-text="t('btn.record')"></button>
         <button x-show="findTimer(modalEvent)" class="record-btn remove-timer-btn"
-                @click="removeTimer(); modalOpen=false" x-text="t('btn.remove_timer')"></button>
+                @click="removeTimer(); closeModal()" x-text="t('btn.remove_timer')"></button>
       </footer>
     </article>
   </dialog>

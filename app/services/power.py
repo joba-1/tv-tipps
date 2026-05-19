@@ -1,4 +1,9 @@
-"""Power management: generic wake/sleep per receiver based on configured power_method."""
+"""Power management: generic wake/sleep per receiver based on configured power_method.
+
+Each function returns ``(ok, reason)``. ``reason`` is ``None`` on success and a
+short human-readable string on failure — callers surface it directly so the user
+sees the real cause instead of a generic warning.
+"""
 from __future__ import annotations
 import socket
 import httpx
@@ -9,6 +14,8 @@ log = get_logger(__name__)
 
 _NEWSTATE_STANDBY = 4   # OpenWebif light standby — network stays up, WOL still works
 
+PowerResult = tuple[bool, str | None]
+
 
 def _send_wol(mac: str, broadcast: str = "255.255.255.255", port: int = 9) -> None:
     mac_bytes = bytes.fromhex(mac.replace(":", "").replace("-", ""))
@@ -18,54 +25,63 @@ def _send_wol(mac: str, broadcast: str = "255.255.255.255", port: int = 9) -> No
         s.sendto(magic, (broadcast, port))
 
 
-async def _wol_wake(rcfg: ReceiverConfig) -> bool:
+async def _wol_wake(rcfg: ReceiverConfig) -> PowerResult:
     mac = rcfg.wol_mac
     if not mac:
         log.warning("power.wol_skipped", receiver=rcfg.name, reason="no wol_mac configured")
-        return False
+        return False, "wol_mac not configured"
     try:
         _send_wol(mac)
         log.info("power.wol_sent", receiver=rcfg.name, mac=mac)
-        return True
+        return True, None
     except Exception as e:
         log.error("power.wol_error", receiver=rcfg.name, error=str(e))
-        return False
+        return False, f"WOL send failed: {e}"
 
 
-async def _wol_sleep(rcfg: ReceiverConfig) -> bool:
+async def _wol_sleep(rcfg: ReceiverConfig) -> PowerResult:
     """Put receiver into light standby via OpenWebif (WOL can still wake it)."""
     url = f"http://{rcfg.ip}/api/powerstate?newstate={_NEWSTATE_STANDBY}"
     try:
         async with httpx.AsyncClient(timeout=5) as client:
             resp = await client.get(url)
-            ok = resp.status_code == 200
-            log.info("power.standby_sent", receiver=rcfg.name, ok=ok)
-            return ok
-    except Exception:
+            if resp.status_code == 200:
+                log.info("power.standby_sent", receiver=rcfg.name, ok=True)
+                return True, None
+            log.info("power.standby_sent", receiver=rcfg.name, ok=False, status=resp.status_code)
+            return False, f"OpenWebif returned HTTP {resp.status_code}"
+    except Exception as e:
         log.debug("power.standby_skipped", receiver=rcfg.name, reason="unreachable")
-        return False
+        return False, f"OpenWebif unreachable: {e}"
 
 
-async def _intertechno_power(rcfg: ReceiverConfig, on: bool) -> bool:
+async def _intertechno_power(rcfg: ReceiverConfig, on: bool) -> PowerResult:
     """Switch via joba-1/IntertechnoGateway. Its /change endpoint only knows the
     button names from its own HTML: 'button-a'..'button-d' to select a family,
     then 'button-1-on'..'button-3-on'/'button-x-on' (and -off variants) to fire.
     Anything else is silently ignored — that's why our old 'D2on' format never
-    triggered the device. We do the two-step (family-select, then on/off)."""
-    url = settings.intertechno_url
+    triggered the device. We do the two-step (family-select, then on/off).
+
+    URL precedence: per-receiver rcfg.intertechno_url wins over the global
+    settings.intertechno_url, so each box can use its own gateway.
+    """
+    url = (rcfg.intertechno_url or settings.intertechno_url or "").rstrip("/")
     family = rcfg.intertechno_family or settings.intertechno_family
     device = rcfg.intertechno_device if rcfg.intertechno_family else settings.intertechno_device
-    if not url or not family:
-        log.warning("power.intertechno_skipped", receiver=rcfg.name, reason="not configured")
-        return False
+    if not url:
+        log.warning("power.intertechno_skipped", receiver=rcfg.name, reason="no intertechno_url")
+        return False, "intertechno_url not configured"
+    if not family:
+        log.warning("power.intertechno_skipped", receiver=rcfg.name, reason="no intertechno_family")
+        return False, "intertechno_family not configured"
     fam_letter = str(family).strip().lower()[:1]
     if fam_letter not in ("a", "b", "c", "d"):
         log.warning("power.intertechno_bad_family", receiver=rcfg.name, family=family)
-        return False
+        return False, f"invalid intertechno_family '{family}' (must be A-D)"
     if device not in (1, 2, 3):
         log.warning("power.intertechno_bad_device", receiver=rcfg.name,
                     device=device, hint="gateway only exposes devices 1/2/3")
-        return False
+        return False, f"invalid intertechno_device {device} (must be 1-3)"
     family_btn = f"button-{fam_letter}"
     action_btn = f"button-{device}-{'on' if on else 'off'}"
     try:
@@ -76,27 +92,30 @@ async def _intertechno_power(rcfg: ReceiverConfig, on: bool) -> bool:
             log.info("power.intertechno", receiver=rcfg.name, on=on,
                      family_btn=family_btn, action_btn=action_btn,
                      status1=r1.status_code, status2=r2.status_code, ok=ok)
-            return ok
+            if ok:
+                return True, None
+            return False, f"gateway returned HTTP {r1.status_code}/{r2.status_code}"
     except Exception as e:
         log.error("power.intertechno_error", receiver=rcfg.name, error=str(e))
-        return False
+        return False, f"gateway unreachable: {e}"
 
 
-async def wake_receiver(rcfg: ReceiverConfig) -> bool:
-    """Wake receiver using its configured power_method."""
+async def wake_receiver(rcfg: ReceiverConfig) -> PowerResult:
+    """Wake receiver using its configured power_method. Returns (ok, reason)."""
     if rcfg.power_method == "wol":
         return await _wol_wake(rcfg)
     elif rcfg.power_method == "intertechno":
         return await _intertechno_power(rcfg, on=True)
     log.debug("power.wake_noop", receiver=rcfg.name, reason="power_method=none")
-    return False
+    return False, "power_method is 'none' for this receiver"
 
 
-async def sleep_receiver(rcfg: ReceiverConfig) -> bool:
-    """Put receiver to sleep/standby using its configured power_method."""
+async def sleep_receiver(rcfg: ReceiverConfig) -> PowerResult:
+    """Put receiver to sleep/standby using its configured power_method.
+    Returns (ok, reason)."""
     if rcfg.power_method == "wol":
         return await _wol_sleep(rcfg)
     elif rcfg.power_method == "intertechno":
         return await _intertechno_power(rcfg, on=False)
     log.debug("power.sleep_noop", receiver=rcfg.name, reason="power_method=none")
-    return False
+    return False, "power_method is 'none' for this receiver"

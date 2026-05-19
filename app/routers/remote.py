@@ -79,8 +79,9 @@ async def zap_to_channel(req: ZapRequest, tv_tipps_user: str | None = Cookie(def
     # Wake from deep standby (unreachable) → send WOL/intertechno, poll until online.
     # Intertechno cold-boots the box from mains power: full boot can take 90–120s.
     if not await client.is_online():
-        if not await wake_receiver(rcfg):
-            raise HTTPException(503, f"Could not wake {rcfg.name}")
+        ok, reason = await wake_receiver(rcfg)
+        if not ok:
+            raise HTTPException(503, f"Could not wake {rcfg.name}: {reason or 'unknown reason'}")
         log.info("remote.waking_receiver", receiver=rcfg.name, method=rcfg.power_method)
         max_wait_sec = 150 if rcfg.power_method == "intertechno" else 45
         for _ in range(max_wait_sec // 5):

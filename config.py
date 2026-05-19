@@ -14,6 +14,7 @@ class ReceiverConfig:
     power_method: str = "none"  # "wol" | "intertechno" | "none"
     intertechno_family: str = ""  # RF family letter, e.g. "A"
     intertechno_device: int = 1   # RF device number, e.g. 1
+    intertechno_url: str = ""     # per-receiver gateway URL, overrides settings.intertechno_url
     location: str = ""            # human-readable room name, e.g. "Wohnzimmer"
 
 

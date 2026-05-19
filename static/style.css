@@ -353,8 +353,10 @@ nav details ul a {
 
 .admin-delete-btn { padding: 0.2rem 0.6rem !important; font-size: 0.78rem; margin: 0; }
 
-.admin-add-form { margin-top: 0.5rem; }
-.admin-add-form > summary {
+.admin-add-form,
+.admin-edit-form { margin-top: 0.5rem; }
+.admin-add-form > summary,
+.admin-edit-form > summary {
   color: var(--pico-primary);
   font-size: 0.85rem;
   cursor: pointer;

@@ -30,6 +30,7 @@ class ReceiverCreateRequest(BaseModel):
     wol_mac: str | None = None
     intertechno_family: str = ""
     intertechno_device: int = 1
+    intertechno_url: str = ""
     has_genre: bool = False
     default_user: str | None = None
 
@@ -57,6 +58,7 @@ async def list_receivers(db: Session = Depends(get_db)):
             "wol_mac": rcfg.wol_mac,
             "intertechno_family": rcfg.intertechno_family,
             "intertechno_device": rcfg.intertechno_device,
+            "intertechno_url": rcfg.intertechno_url,
             "default_user": rcfg.default_user or None,
         })
     return result
@@ -70,6 +72,7 @@ def create_receiver(req: ReceiverCreateRequest, db: Session = Depends(get_db)):
         name=req.name, ip=req.ip, location=req.location, priority=req.priority,
         power_method=req.power_method, wol_mac=req.wol_mac or None,
         intertechno_family=req.intertechno_family, intertechno_device=req.intertechno_device,
+        intertechno_url=req.intertechno_url,
         has_genre=req.has_genre, default_user=req.default_user,
         power_state="unknown",
     )
@@ -82,7 +85,17 @@ def create_receiver(req: ReceiverCreateRequest, db: Session = Depends(get_db)):
 
 
 class ReceiverPatchRequest(BaseModel):
-    default_user: str | None = None  # "" or None to clear
+    # All optional — None = "leave as-is". Empty string clears string fields.
+    ip: str | None = None
+    location: str | None = None
+    priority: int | None = None
+    power_method: str | None = None
+    wol_mac: str | None = None
+    intertechno_family: str | None = None
+    intertechno_device: int | None = None
+    intertechno_url: str | None = None
+    has_genre: bool | None = None
+    default_user: str | None = None
 
 
 @router.patch("/api/admin/receivers/{name}")
@@ -90,13 +103,54 @@ def update_receiver(name: str, req: ReceiverPatchRequest, db: Session = Depends(
     r = db.query(Receiver).filter_by(name=name).first()
     if not r:
         raise HTTPException(404, f"Receiver '{name}' not found")
+
+    if req.ip is not None:
+        ip = req.ip.strip()
+        if not ip:
+            raise HTTPException(400, "ip must not be empty")
+        r.ip = ip
+    if req.location is not None:
+        r.location = req.location.strip()
+    if req.priority is not None:
+        if not 1 <= req.priority <= 99:
+            raise HTTPException(400, "priority must be 1..99")
+        r.priority = req.priority
+    if req.power_method is not None:
+        pm = req.power_method.strip().lower()
+        if pm not in ("none", "wol", "intertechno"):
+            raise HTTPException(400, "power_method must be none|wol|intertechno")
+        r.power_method = pm
+    if req.wol_mac is not None:
+        r.wol_mac = req.wol_mac.strip() or None
+    if req.intertechno_family is not None:
+        fam = req.intertechno_family.strip()
+        if fam and fam.lower() not in ("a", "b", "c", "d"):
+            raise HTTPException(400, "intertechno_family must be A-D")
+        r.intertechno_family = fam.upper()
+    if req.intertechno_device is not None:
+        if req.intertechno_device not in (1, 2, 3):
+            raise HTTPException(400, "intertechno_device must be 1-3")
+        r.intertechno_device = req.intertechno_device
+    if req.intertechno_url is not None:
+        r.intertechno_url = req.intertechno_url.strip()
+    if req.has_genre is not None:
+        r.has_genre = bool(req.has_genre)
     if req.default_user is not None:
         slug = req.default_user.strip() or None
         if slug and not db.query(User).filter_by(slug=slug).first():
             raise HTTPException(400, f"Unknown user '{slug}'")
         r.default_user = slug or ""
+
     db.commit()
-    return {"ok": True, "name": name, "default_user": r.default_user or None}
+    return {
+        "ok": True, "name": r.name, "ip": r.ip, "location": r.location,
+        "priority": r.priority, "power_method": r.power_method,
+        "wol_mac": r.wol_mac, "intertechno_family": r.intertechno_family,
+        "intertechno_device": r.intertechno_device,
+        "intertechno_url": r.intertechno_url,
+        "has_genre": r.has_genre,
+        "default_user": r.default_user or None,
+    }
 
 
 @router.delete("/api/admin/receivers/{name}")
@@ -198,6 +252,8 @@ async def admin_status(db: Session = Depends(get_db)):
             epg_cached_at=epg_cached_at, power_method=rcfg.power_method,
             has_genre=rcfg.has_genre, priority=rcfg.priority, location=rcfg.location,
             default_user=rcfg.default_user or None,
+            wol_mac=rcfg.wol_mac, intertechno_family=rcfg.intertechno_family,
+            intertechno_device=rcfg.intertechno_device, intertechno_url=rcfg.intertechno_url,
         ))
     db.commit()
 
@@ -412,9 +468,10 @@ async def admin_power(receiver: str, action: str, db: Session = Depends(get_db))
     if not rcfg:
         raise HTTPException(404, f"Receiver '{receiver}' not found")
     if action == "wake":
-        ok = await wake_receiver(rcfg)
+        ok, reason = await wake_receiver(rcfg)
     elif action == "sleep":
-        ok = await sleep_receiver(rcfg)
+        ok, reason = await sleep_receiver(rcfg)
     else:
         raise HTTPException(400, "action must be 'wake' or 'sleep'")
-    return {"ok": ok, "receiver": receiver, "action": action, "power_method": rcfg.power_method}
+    return {"ok": ok, "receiver": receiver, "action": action,
+            "power_method": rcfg.power_method, "reason": reason}

@@ -54,6 +54,10 @@ class ReceiverStatus(BaseModel):
     priority: int = 99
     location: str = ""
     default_user: str | None = None
+    wol_mac: str | None = None
+    intertechno_family: str = ""
+    intertechno_device: int = 1
+    intertechno_url: str = ""
 
 
 class AdminStatus(BaseModel):

@@ -50,6 +50,8 @@ function tvApp() {
     epgContext: "4h",
     epgSearchQuery: "",
     _epgSearchTimer: null,
+    // Track first entry to EPG page so background refreshes don't yank scroll.
+    _epgNeedsInitialScroll: true,
 
     // Likes / dislikes
     likedIds: new Set(),
@@ -69,7 +71,8 @@ function tvApp() {
     activityOpen: {},    // slug → bool (details expanded)
     activityLoading: {}, // slug → bool
     unattributed: [],    // confirmed sessions with no user assigned
-    newReceiver: { name: "", ip: "", location: "", priority: 99, power_method: "none", wol_mac: "", intertechno_family: "", intertechno_device: 1, has_genre: false },
+    newReceiver: { name: "", ip: "", location: "", priority: 99, power_method: "none", wol_mac: "", intertechno_family: "", intertechno_device: 1, intertechno_url: "", has_genre: false },
+    editReceiver: { name: "" },
     newUser: { slug: "", name: "" },
 
     // Receiver auto-deselect
@@ -146,6 +149,9 @@ function tvApp() {
         this.page = hash || "recs";
         if (prevPage === "remote" && this.page !== "remote") this._stopScreenshotPoll();
         if (prevPage === "recs"   && this.page !== "recs")   this._cancelFastRecsPoll();
+        // Entering EPG fresh → scroll to current programme on first load only;
+        // periodic refreshes keep the user's scroll position intact.
+        if (prevPage !== "epg" && this.page === "epg") this._epgNeedsInitialScroll = true;
         if (this.page === "epg")    { this.loadEpg();     this.loadRecsMap(); this.loadTimers(); }
         if (this.page === "now")    { this.loadNowNext(); this.loadRecsMap(); this.loadTimers(); }
         if (this.page === "recs")   { this.loadRecs();    this.loadTimers(); }
@@ -420,15 +426,18 @@ function tvApp() {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(body),
         });
-        const data = await res.json();
-        if (data.ok) {
+        const data = await res.json().catch(() => ({}));
+        if (res.ok && data.ok) {
           const receiverLabel = data.receiver_location || data.receiver_name;
           this._toast(data.woke
             ? this.t("msg.zap_woke", { receiver: receiverLabel })
             : this.t("msg.zap_ok",   { receiver: receiverLabel })
           );
         } else {
-          this._toast(this.t("msg.zap_fail"));
+          // FastAPI HTTPException puts the real reason in `detail`; surface that
+          // verbatim so the user sees "intertechno_url not configured" etc.
+          const reason = data.detail || data.reason || "";
+          this._toast(this.t("msg.zap_fail") + (reason ? ` — ${reason}` : ""));
         }
       } catch (_) {
         this._toast(this.t("msg.connect_error"));
@@ -474,7 +483,10 @@ function tvApp() {
         const res = await fetch(url, { credentials: "include" });
         if (!res.ok) throw new Error(res.statusText);
         this.epgEvents = await res.json();
-        this.$nextTick(() => this._epgScrollToNow());
+        if (this._epgNeedsInitialScroll) {
+          this._epgNeedsInitialScroll = false;
+          this.$nextTick(() => this._epgScrollToNow());
+        }
       } catch (e) {
         console.error("loadEpg failed:", e);
       } finally {
@@ -496,6 +508,8 @@ function tvApp() {
     setEpgContext(ctx) {
       this.epgContext = ctx;
       this.epgSearchQuery = "";
+      // Context change is a deliberate user action — scroll to "now" again.
+      this._epgNeedsInitialScroll = true;
       this.loadEpg();
     },
 
@@ -714,7 +728,7 @@ function tvApp() {
         this.adminMsg = data.ok
           ? this.t(action === "wake" ? "msg.power_wake_ok" : "msg.power_sleep_ok",
                    { name, method: data.power_method })
-          : this.t("msg.power_error", { error: data.error || "?" });
+          : this.t("msg.power_error", { error: data.reason || data.error || "?" });
         setTimeout(() => this.loadReceivers(), 3000);
       } catch (_) {
         this.adminMsg = this.t("msg.connect_error");
@@ -733,8 +747,43 @@ function tvApp() {
         const data = await res.json();
         if (res.ok) {
           this.adminMsg = `✓ ${data.name} ${this.t("msg.receiver_added")}`;
-          this.newReceiver = { name: "", ip: "", location: "", priority: 99, power_method: "none", wol_mac: "", has_genre: false };
+          this.newReceiver = { name: "", ip: "", location: "", priority: 99, power_method: "none", wol_mac: "", intertechno_family: "", intertechno_device: 1, intertechno_url: "", has_genre: false };
           await this.loadReceivers();
+        } else {
+          this.adminMsg = `⚠️ ${data.detail || this.t("msg.refresh_error")}`;
+        }
+      } catch (_) { this.adminMsg = this.t("msg.connect_error"); }
+    },
+
+    startEditReceiver(r) {
+      // Snapshot current values into the edit form so unsaved tweaks live here only.
+      this.editReceiver = {
+        name: r.name,
+        ip: r.ip || "",
+        location: r.location || "",
+        priority: r.priority ?? 99,
+        power_method: r.power_method || "none",
+        wol_mac: r.wol_mac || "",
+        intertechno_family: r.intertechno_family || "",
+        intertechno_device: r.intertechno_device ?? 1,
+        intertechno_url: r.intertechno_url || "",
+        has_genre: !!r.has_genre,
+      };
+    },
+
+    async saveReceiver(name) {
+      try {
+        const body = { ...this.editReceiver };
+        delete body.name;
+        const res = await fetch(`/api/admin/receivers/${encodeURIComponent(name)}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+        });
+        const data = await res.json();
+        if (res.ok) {
+          this.adminMsg = `✓ ${name} ${this.t("msg.receiver_updated")}`;
+          await this.loadAdminStatus();
         } else {
           this.adminMsg = `⚠️ ${data.detail || this.t("msg.refresh_error")}`;
         }
@@ -823,8 +872,8 @@ function tvApp() {
           `/api/admin/power?receiver=${encodeURIComponent(name)}&action=wake`,
           { method: "POST" }
         );
-        const data = await res.json();
-        this._remoteToast(data.ok ? "✓" : "⚠️");
+        const data = await res.json().catch(() => ({}));
+        this._remoteToast(data.ok ? "✓" : ("⚠️ " + (data.reason || "")));
         if (data.ok) setTimeout(() => this.refreshScreenshot(), 4000);
       } catch (_) { this._remoteToast("⚠️"); }
     },
@@ -837,8 +886,8 @@ function tvApp() {
           `/api/admin/power?receiver=${encodeURIComponent(name)}&action=sleep`,
           { method: "POST" }
         );
-        const data = await res.json();
-        this._remoteToast(data.ok ? "✓" : "⚠️");
+        const data = await res.json().catch(() => ({}));
+        this._remoteToast(data.ok ? "✓" : ("⚠️ " + (data.reason || "")));
       } catch (_) { this._remoteToast("⚠️"); }
     },
 
@@ -958,11 +1007,23 @@ function tvApp() {
     },
 
     showDetail(event, channelName, sref = null) {
+      // Snapshot scroll so closing the modal returns to the same row in the list.
+      // iOS Safari sometimes resets body scroll when a <dialog open> appears.
+      this._scrollBeforeModal = window.scrollY;
       this.modalEvent = event;
       this.modalChannel = channelName;
       this.modalSref = sref || event?.sref || "";
       this.modalIsLive = this.isLive(event);
       this.modalOpen = true;
+    },
+
+    closeModal() {
+      this.modalOpen = false;
+      if (this._scrollBeforeModal != null) {
+        const y = this._scrollBeforeModal;
+        this._scrollBeforeModal = null;
+        this.$nextTick(() => window.scrollTo(0, y));
+      }
     },
 
     piconUrl(piconPath) {
