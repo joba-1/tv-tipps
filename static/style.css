@@ -4,16 +4,19 @@
 
 /* iOS standalone (Add to Home Screen) — status bar is translucent over our UI,
    so we pad with the safe-area insets to avoid clipping behind the notch and
-   horizontal rounded corners on landscape. */
+   horizontal rounded corners on landscape. The top inset lives on the nav so
+   the sticky bar pins at viewport top:0 from the first pixel (no warm-up
+   scroll) and its own padding pushes the buttons below the status bar. */
 body {
-  padding-top: env(safe-area-inset-top);
   padding-bottom: env(safe-area-inset-bottom);
   padding-left: env(safe-area-inset-left);
   padding-right: env(safe-area-inset-right);
 }
 
 nav {
-  padding: 0.5rem 1rem;
+  /* Top padding == safe-area inset only, so buttons sit flush against the
+     translucent status bar without an extra gap. */
+  padding: env(safe-area-inset-top) 1rem 0.5rem;
   border-bottom: 1px solid var(--pico-muted-border-color);
   position: sticky;
   top: 0;
@@ -353,15 +356,21 @@ nav details ul a {
 
 .admin-delete-btn { padding: 0.2rem 0.6rem !important; font-size: 0.78rem; margin: 0; }
 
-.admin-add-form,
-.admin-edit-form { margin-top: 0.5rem; }
-.admin-add-form > summary,
-.admin-edit-form > summary {
+.admin-add-form { margin-top: 0.5rem; }
+.admin-add-form > summary {
   color: var(--pico-primary);
   font-size: 0.85rem;
   cursor: pointer;
   padding: 0.3rem 0;
 }
+
+/* Inline edit panel sits below the Wake/Sleep/Edit/Delete footer row. */
+.admin-edit-panel {
+  margin-top: 0.5rem;
+  padding-top: 0.5rem;
+  border-top: 1px solid var(--pico-muted-border-color);
+}
+.admin-edit-panel button { font-size: 0.82rem; padding: 0.3rem 0.6rem; }
 .admin-add-fields {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));

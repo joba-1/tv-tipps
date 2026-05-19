@@ -215,8 +215,9 @@
 
     <div x-show="!loadingEpg" class="event-list">
       <template x-for="ev in epgEvents" :key="ev.id">
-        <article class="event-row" :class="isLive(ev) ? 'live' : ''"
-                 :data-end="ev.end_time" @click="showDetail(ev, displayChannel(ev.channel_name))" role="button">
+        <article class="event-row epg-row" :class="isLive(ev) ? 'live' : ''"
+                 :data-start="ev.start_time" :data-end="ev.end_time"
+                 @click="showDetail(ev, displayChannel(ev.channel_name))" role="button">
           <div class="event-meta">
             <div class="event-time"
                  x-text="formatTime(ev.start_time) + ' – ' + formatTime(ev.end_time)"></div>
@@ -294,13 +295,14 @@
               <button class="outline secondary" @click="receiverPower(r.name, 'sleep')"
                       x-show="r.power_method !== 'none'"
                       x-text="t('btn.sleep')"></button>
+              <button class="outline secondary" @click="toggleEditReceiver(r)"
+                      x-text="t('label.edit_receiver')"></button>
               <button class="outline secondary admin-delete-btn" @click="deleteReceiver(r.name)"
                       x-text="t('btn.delete')"></button>
             </footer>
 
-            <details class="admin-edit-form" @toggle="if ($event.target.open) startEditReceiver(r)">
-              <summary x-text="t('label.edit_receiver')"></summary>
-              <div class="admin-add-fields" x-show="editReceiver.name === r.name">
+            <div class="admin-edit-panel" x-show="editReceiver.name === r.name">
+              <div class="admin-add-fields">
                 <label><span x-text="t('label.receiver_ip')"></span>
                   <input x-model="editReceiver.ip"></label>
                 <label><span x-text="t('label.receiver_location')"></span>
@@ -338,9 +340,9 @@
                 <label><span x-text="t('label.receiver_has_genre')"></span>
                   <input type="checkbox" role="switch" x-model="editReceiver.has_genre">
                 </label>
-                <button @click="saveReceiver(r.name)" x-text="t('btn.save')"></button>
+                <button class="outline" @click="saveReceiver(r.name)" x-text="t('btn.save')"></button>
               </div>
-            </details>
+            </div>
           </article>
         </template>
       </div>

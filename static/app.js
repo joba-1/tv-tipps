@@ -475,6 +475,11 @@ function tvApp() {
 
     async loadEpg() {
       this.loadingEpg = true;
+      // Background refresh: anchor the current scroll position to the topmost
+      // visible event's start_time, so we can restore it after reload even if
+      // earlier rows were inserted or removed. Initial loads skip this — they
+      // scroll to "now" instead.
+      const anchorTime = this._epgNeedsInitialScroll ? null : this._recordEpgAnchor();
       try {
         let url = "/api/epg?";
         if (this.epgContext === "tonight") url += "context=tonight";
@@ -486,6 +491,8 @@ function tvApp() {
         if (this._epgNeedsInitialScroll) {
           this._epgNeedsInitialScroll = false;
           this.$nextTick(() => this._epgScrollToNow());
+        } else if (anchorTime) {
+          this.$nextTick(() => this._restoreEpgAnchor(anchorTime));
         }
       } catch (e) {
         console.error("loadEpg failed:", e);
@@ -494,9 +501,36 @@ function tvApp() {
       }
     },
 
+    _recordEpgAnchor() {
+      // Topmost EPG row whose top edge is at or below the sticky nav.
+      const navBottom = document.querySelector("nav")?.getBoundingClientRect().bottom || 0;
+      const rows = document.querySelectorAll(".epg-row[data-start]");
+      for (const row of rows) {
+        const top = row.getBoundingClientRect().top;
+        if (top >= navBottom - 2) return row.dataset.start || null;
+      }
+      return null;
+    },
+
+    _restoreEpgAnchor(savedStart) {
+      // Scroll to the first row whose start_time is >= the saved anchor. This
+      // survives inserts/deletes anywhere in the list — the viewport stays
+      // pinned to the same point in the schedule.
+      const rows = document.querySelectorAll(".epg-row[data-start]");
+      let target = null;
+      for (const row of rows) {
+        if ((row.dataset.start || "") >= savedStart) { target = row; break; }
+      }
+      if (!target) return;
+      const navBottom = document.querySelector("nav")?.getBoundingClientRect().bottom || 0;
+      const rect = target.getBoundingClientRect();
+      // Align the target row's top with the bottom of the sticky nav.
+      window.scrollBy({ top: rect.top - navBottom, behavior: "instant" });
+    },
+
     _epgScrollToNow() {
       const now = new Date().toISOString();
-      const rows = document.querySelectorAll(".event-row[data-end]");
+      const rows = document.querySelectorAll(".epg-row[data-end]");
       for (const row of rows) {
         if (row.dataset.end > now) {
           row.scrollIntoView({ block: "start" });
@@ -753,6 +787,15 @@ function tvApp() {
           this.adminMsg = `⚠️ ${data.detail || this.t("msg.refresh_error")}`;
         }
       } catch (_) { this.adminMsg = this.t("msg.connect_error"); }
+    },
+
+    toggleEditReceiver(r) {
+      // Toggle the inline edit panel; if it's already open for this receiver, close.
+      if (this.editReceiver.name === r.name) {
+        this.editReceiver = { name: "" };
+      } else {
+        this.startEditReceiver(r);
+      }
     },
 
     startEditReceiver(r) {
