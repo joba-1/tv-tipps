@@ -1,5 +1,6 @@
 """EPG fetch, cache, and query."""
 from __future__ import annotations
+import asyncio
 from datetime import datetime
 from sqlalchemy import func
 from sqlalchemy.orm import Session
@@ -99,6 +100,7 @@ async def refresh_epg_service(channel: Channel, client: EnigmaClient, db: Sessio
         return 0
 
     count = 0
+    touched_keys: list[tuple[int, datetime]] = []
 
     for ev in events:
         stmt = (
@@ -129,9 +131,25 @@ async def refresh_epg_service(channel: Channel, client: EnigmaClient, db: Sessio
             },
         )
         db.execute(stmt)
+        touched_keys.append((channel.id, ev.start_time))
         count += 1
 
     db.commit()
+
+    # Resolve the (channel, start_time) pairs back to EpgEvent ids and fire a
+    # background scoring task. The scorer skips events that already have a
+    # fresh row, so retracing updated events here is harmless.
+    if touched_keys:
+        ids = [
+            row[0] for row in db.query(EpgEvent.id).filter(
+                EpgEvent.channel_id == channel.id,
+                EpgEvent.start_time.in_([k[1] for k in touched_keys]),
+                EpgEvent.end_time > now,
+            ).all()
+        ]
+        if ids:
+            from app.services.scoring import score_events_for_all_users
+            asyncio.create_task(score_events_for_all_users(ids))
     return count
 
 

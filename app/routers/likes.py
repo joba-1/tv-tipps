@@ -5,6 +5,10 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from app.database import get_db
 from app.models import User, UserLike, EpgEvent, Channel, RecommendationCache
+from app.services.scoring import (
+    set_explicit_score, clear_explicit_score,
+    mark_user_llm_rows_stale, schedule_rerate,
+)
 from app.timezones import utcnow
 
 router = APIRouter()
@@ -72,12 +76,18 @@ def toggle_like(
             db.delete(existing)
             db.query(RecommendationCache).filter_by(user_id=user.id).delete()
             db.commit()
+            # Drop the explicit score override so the next re-rate decides freely.
+            clear_explicit_score(user.id, req.epg_event_id, db)
+            mark_user_llm_rows_stale(user.id, except_event_id=None, db=db)
+            schedule_rerate(user.id)
             return {"liked": False, "disliked": False, "epg_event_id": req.epg_event_id}
         else:
             # switched sentiment → update in place
             existing.sentiment = req.sentiment
             db.query(RecommendationCache).filter_by(user_id=user.id).delete()
             db.commit()
+            _apply_reaction_side_effects(user.id, req.epg_event_id,
+                                         liked=(req.sentiment == "like"), db=db)
             return {"liked": req.sentiment == "like", "disliked": req.sentiment == "dislike",
                     "epg_event_id": req.epg_event_id}
 
@@ -96,5 +106,17 @@ def toggle_like(
     ))
     db.query(RecommendationCache).filter_by(user_id=user.id).delete()
     db.commit()
+    _apply_reaction_side_effects(user.id, req.epg_event_id,
+                                 liked=(req.sentiment == "like"), db=db)
     return {"liked": req.sentiment == "like", "disliked": req.sentiment == "dislike",
             "epg_event_id": req.epg_event_id}
+
+
+def _apply_reaction_side_effects(user_id: int, epg_event_id: int, liked: bool, db) -> None:
+    """Three-step response to a like/dislike toggle:
+      1) Override the score for THIS event immediately (UI sees the change now).
+      2) Mark every other LLM/rule score for this user as stale.
+      3) Debounce-schedule a background re-rate so a burst of likes coalesces."""
+    set_explicit_score(user_id, epg_event_id, liked=liked, db=db)
+    mark_user_llm_rows_stale(user_id, except_event_id=epg_event_id, db=db)
+    schedule_rerate(user_id)

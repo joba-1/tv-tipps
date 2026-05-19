@@ -308,9 +308,8 @@ def _check_empty_epg(receiver: Receiver, channel_ids: set[int], db: Session) -> 
         log.warning("epg.channels_out_of_data",
                     receiver=receiver.name, count=len(flagged),
                     channels=flagged[:40])  # cap log payload
-    # Warm recommendation cache in background — must NOT block EPG refresh or
-    # startup; each LLM call takes seconds and we warm all contexts × users.
-    asyncio.create_task(_warm_recommendation_cache())
+    # Score-backed recs read pre-computed per-event scores; the old per-context
+    # warm is redundant. Per-event scoring happens at EPG ingest, not here.
 
 
 _warming = False
@@ -484,5 +483,31 @@ def start_scheduler() -> None:
         minute=0,
         id="cleanup_epg",
     )
+
+    # Daily catch-all that re-rates any stale UserEventScore rows the debounced
+    # like/dislike path missed. Runs after EPG cleanup so it sees the current
+    # future-event set.
+    from app.services.scoring import (
+        daily_rerate_stale, ai_availability_watcher, bootstrap_unscored,
+    )
+
+    def _run_daily_rerate():
+        import asyncio as _aio
+        _aio.create_task(daily_rerate_stale())
+
+    scheduler.add_job(
+        _run_daily_rerate,
+        "cron",
+        hour=4,
+        minute=15,
+        id="rerate_stale",
+    )
+
     scheduler.start()
     log.info("scheduler.started")
+
+    # Background loop: upgrade any 'rule'-sourced score rows to LLM scores the
+    # moment Ollama becomes reachable again — without waiting for the cron.
+    asyncio.create_task(ai_availability_watcher())
+    # On startup: score any future EPG events we don't have rows for yet.
+    asyncio.create_task(bootstrap_unscored())

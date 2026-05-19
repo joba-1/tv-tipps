@@ -194,6 +194,27 @@ class UserLike(Base):
     created_at: Mapped[datetime] = mapped_column(nullable=False)
 
 
+class UserEventScore(Base):
+    __tablename__ = "user_event_scores"
+    __table_args__ = (
+        Index("idx_ues_user_score", "user_id", "match_score"),
+        Index("idx_ues_user_source_stale", "user_id", "source", "stale"),
+    )
+
+    user_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), primary_key=True
+    )
+    epg_event_id: Mapped[int] = mapped_column(
+        ForeignKey("epg_events.id", ondelete="CASCADE"), primary_key=True
+    )
+    match_score: Mapped[float] = mapped_column(Float, nullable=False)
+    reason: Mapped[str | None] = mapped_column(Text)
+    # llm | rule | explicit_like | explicit_dislike
+    source: Mapped[str] = mapped_column(String(16), nullable=False, default="llm", server_default="llm")
+    rated_at: Mapped[datetime] = mapped_column(nullable=False)
+    stale: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="0")
+
+
 class Translation(Base):
     __tablename__ = "translations"
 

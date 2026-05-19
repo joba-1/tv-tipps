@@ -28,5 +28,5 @@ async def get_recommendations(
             "recommendations": [], "cached": False, "cold_start": True,
         }
 
-    from app.services.recommendations import get_recommendations as _get
-    return await _get(user.id, user.name, context, db)
+    from app.services.scoring import get_recommendations_from_scores
+    return await get_recommendations_from_scores(user.id, user.name, context, db)

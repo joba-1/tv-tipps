@@ -298,12 +298,18 @@ def get_user_preferences(user: str, db: Session = Depends(get_db)):
 def set_user_preferences(user: str, req: UserPreferencesRequest, db: Session = Depends(get_db)):
     from app.models import RecommendationCache
     from app.services.profile import set_stated_preferences
+    from app.services.scoring import mark_user_llm_rows_stale, schedule_rerate
     u = db.query(User).filter_by(slug=user).first()
     if not u:
         return {"ok": False, "error": f"unknown user '{user}'"}
     set_stated_preferences(u.id, req.preferences, db)
     db.query(RecommendationCache).filter_by(user_id=u.id).delete()
     db.commit()
+    # Preferences just changed → every existing LLM/rule score for this user
+    # reflects the old profile. Mark stale + queue a debounced re-rate so the
+    # new preferences propagate without waiting for the nightly cron.
+    mark_user_llm_rows_stale(u.id, except_event_id=None, db=db)
+    schedule_rerate(u.id)
     return {"ok": True, "user": user}
 
 
@@ -426,8 +432,11 @@ def assign_session(session_id: int, req: SessionAssignRequest, db: Session = Dep
         s.user_id = None
         s.attribution_method = None
     # Invalidate recs for both old and new owner so the next request re-ranks.
+    from app.services.scoring import mark_user_llm_rows_stale, schedule_rerate
     for uid in {old_uid, s.user_id} - {None}:
         db.query(RecommendationCache).filter_by(user_id=uid).delete()
+        mark_user_llm_rows_stale(uid, except_event_id=None, db=db)
+        schedule_rerate(uid)
     db.commit()
     return {"ok": True, "id": session_id, "user_id": s.user_id}
 
