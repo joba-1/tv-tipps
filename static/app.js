@@ -279,6 +279,9 @@ function tvApp() {
     async loadRecsMap() {
       // Aggregate AI picks across all contexts → { event_id: match_score }.
       // All four calls hit warm caches (~5 ms each).
+      // Badge spans toggling can change row heights and shift the EPG list —
+      // anchor the topmost visible row so the user stays in place.
+      const anchor = this.page === "epg" ? this._recordEpgAnchor() : null;
       const map = {};
       const ctxs = ["now", "next", "prime", "today"];
       await Promise.all(ctxs.map(async (ctx) => {
@@ -297,6 +300,7 @@ function tvApp() {
         } catch (_) {}
       }));
       this.recsMap = map;
+      if (anchor) this.$nextTick(() => this._restoreEpgAnchor(anchor));
     },
 
     recsMatch(eventId) {
@@ -304,6 +308,7 @@ function tvApp() {
     },
 
     async loadTimers() {
+      const anchor = this.page === "epg" ? this._recordEpgAnchor() : null;
       try {
         const recv = this.selectedReceiver
           ? `?receiver=${encodeURIComponent(this.selectedReceiver.name)}`
@@ -324,6 +329,7 @@ function tvApp() {
           }
         }
         this.timersMap = map;
+        if (anchor) this.$nextTick(() => this._restoreEpgAnchor(anchor));
       } catch (_) {}
     },
 
