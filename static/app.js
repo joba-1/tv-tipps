@@ -160,6 +160,14 @@ function tvApp() {
       };
       window.addEventListener("hashchange", route);
 
+      // Persist EPG scroll position to sessionStorage so that switching apps
+      // (or a PWA cold-start back into #epg) lands at the same point in the
+      // schedule instead of jumping to "now" or to the top.
+      window.addEventListener("scroll", () => this._scheduleSaveEpgAnchor(), { passive: true });
+      window.addEventListener("visibilitychange", () => {
+        if (document.visibilityState === "hidden") this._saveEpgAnchorNow();
+      });
+
       await this.loadReceivers();
 
       const cookieUser = this._getCookie("tv_tipps_user");
@@ -490,7 +498,9 @@ function tvApp() {
         this.epgEvents = await res.json();
         if (this._epgNeedsInitialScroll) {
           this._epgNeedsInitialScroll = false;
-          this.$nextTick(() => this._epgScrollToNow());
+          const saved = this._loadSavedEpgAnchor();
+          if (saved) this.$nextTick(() => this._restoreEpgAnchor(saved));
+          else       this.$nextTick(() => this._epgScrollToNow());
         } else if (anchorTime) {
           this.$nextTick(() => this._restoreEpgAnchor(anchorTime));
         }
@@ -499,6 +509,34 @@ function tvApp() {
       } finally {
         this.loadingEpg = false;
       }
+    },
+
+    _scheduleSaveEpgAnchor() {
+      if (this.page !== "epg") return;
+      clearTimeout(this._saveAnchorTimer);
+      this._saveAnchorTimer = setTimeout(() => this._saveEpgAnchorNow(), 500);
+    },
+
+    _saveEpgAnchorNow() {
+      if (this.page !== "epg") return;
+      const time = this._recordEpgAnchor();
+      if (!time) return;
+      try {
+        sessionStorage.setItem("tv-tipps:epg-anchor",
+          JSON.stringify({ time, savedAt: Date.now() }));
+      } catch (_) {}
+    },
+
+    _loadSavedEpgAnchor() {
+      try {
+        const raw = sessionStorage.getItem("tv-tipps:epg-anchor");
+        if (!raw) return null;
+        const { time, savedAt } = JSON.parse(raw);
+        // Stale anchors (>6 h) point at programmes that have likely aired —
+        // fall back to "now" rather than scrolling deep into the past.
+        if (!time || Date.now() - savedAt > 6 * 3600 * 1000) return null;
+        return time;
+      } catch (_) { return null; }
     },
 
     _recordEpgAnchor() {
@@ -542,8 +580,10 @@ function tvApp() {
     setEpgContext(ctx) {
       this.epgContext = ctx;
       this.epgSearchQuery = "";
-      // Context change is a deliberate user action — scroll to "now" again.
+      // Context change is a deliberate user action — scroll to "now" again
+      // and drop any saved anchor that would override the jump.
       this._epgNeedsInitialScroll = true;
+      try { sessionStorage.removeItem("tv-tipps:epg-anchor"); } catch (_) {}
       this.loadEpg();
     },
 
