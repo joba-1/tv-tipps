@@ -557,6 +557,8 @@ def _rule_future_event_ids(user_id: int, db: Session) -> list[int]:
 
 async def bootstrap_unscored() -> None:
     """On startup: rate every future EPG event that no user has a row for yet.
+    Interleaves users so neither one starves while the other's queue grinds —
+    each round-trip scores one batch per user before moving on.
     Idempotent and cheap when the table is already populated."""
     db = SessionLocal()
     try:
@@ -564,17 +566,32 @@ async def bootstrap_unscored() -> None:
         future_ids = [
             r[0] for r in db.query(EpgEvent.id)
             .filter(EpgEvent.end_time > now)
+            .order_by(EpgEvent.start_time.asc())
             .all()
         ]
         if not future_ids:
             return
-        for user in db.query(User).all():
+        users = db.query(User).all()
+        # Per-user queues of pending event_ids, in start_time order.
+        queues: list[tuple[User, list[int]]] = []
+        for user in users:
             pending = _pending_event_ids_for_user(user.id, future_ids, db)
             if pending:
+                queues.append((user, pending))
                 log.info("scoring.bootstrap_start",
                          user_id=user.id, pending=len(pending))
-                await score_events_for_user(user, pending, db)
-                log.info("scoring.bootstrap_done", user_id=user.id)
+        if not queues:
+            return
+        # Round-robin one batch per user per pass until every queue is drained.
+        while any(q for _, q in queues):
+            for user, pending in queues:
+                if not pending:
+                    continue
+                chunk_ids = pending[:_BATCH_SIZE]
+                del pending[:_BATCH_SIZE]
+                await score_events_for_user(user, chunk_ids, db)
+        for user, _ in queues:
+            log.info("scoring.bootstrap_done", user_id=user.id)
     finally:
         db.close()
 
@@ -617,31 +634,66 @@ async def get_recommendations_from_scores(
             "recommendations": [], "cached": False, "cold_start": False,
         }
 
-    rows = (
+    # Restrict to the user's channels — recommend only what the user can watch.
+    user_channel_ids = {c.id for c in get_channels_for_user(user_id, db)}
+    if not user_channel_ids:
+        return {
+            "context": context, "user_name": user_name, "taste_summary": "",
+            "recommendations": [], "cached": False, "cold_start": True,
+        }
+
+    # All scored rows in the window for this user.
+    scored = (
         db.query(UserEventScore, EpgEvent, Channel)
         .join(EpgEvent, EpgEvent.id == UserEventScore.epg_event_id)
         .join(Channel, Channel.id == EpgEvent.channel_id)
-        .filter(UserEventScore.user_id == user_id, win_filter)
-        .order_by(UserEventScore.match_score.desc(), EpgEvent.start_time)
-        .limit(limit * 3)  # over-fetch for the "now" near-end filter
+        .filter(
+            UserEventScore.user_id == user_id,
+            win_filter,
+            Channel.id.in_(user_channel_ids),
+        )
         .all()
     )
 
-    if not rows:
-        # No scored rows yet — fall back to rule_based_rank over fresh candidates
-        # so the user sees something while bootstrap finishes.
-        channel_ids = [c.id for c in get_channels_for_user(user_id, db)]
-        candidates = _epg_candidates(context, channel_ids, db)
-        recs = rule_based_rank(candidates, context, db)
-        return {
-            "context": context, "user_name": user_name,
-            "taste_summary": "Erste Empfehlungen — KI-Bewertung läuft im Hintergrund…",
-            "recommendations": recs,
-            "cached": False, "cold_start": True, "regenerating": True,
-        }
+    # All events in the window the user could watch, so we can supplement.
+    all_events = (
+        db.query(EpgEvent, Channel)
+        .join(Channel, Channel.id == EpgEvent.channel_id)
+        .filter(win_filter, Channel.id.in_(user_channel_ids))
+        .all()
+    )
 
+    by_event_id: dict[int, dict] = {}
+    for ues, ev, ch in scored:
+        by_event_id[ev.id] = {
+            "score": ues.match_score, "reason": ues.reason or "",
+            "ev": ev, "ch": ch, "source": ues.source,
+        }
+    unscored: list[int] = []
+    for ev, ch in all_events:
+        if ev.id in by_event_id:
+            continue
+        # Rule-based stop-gap so the page is full even while LLM is still
+        # bootstrapping this user's scores.
+        by_event_id[ev.id] = {
+            "score": _rule_score(ev, ch), "reason": "",
+            "ev": ev, "ch": ch, "source": "rule_inline",
+        }
+        unscored.append(ev.id)
+
+    # Background scoring for events we just rule-scored — next page hit gets
+    # real LLM signal. Fire-and-forget; the scorer is idempotent and skips
+    # events that already have fresh rows.
+    if unscored:
+        user_obj = db.get(User, user_id)
+        if user_obj:
+            asyncio.create_task(score_events_for_user(user_obj, unscored, SessionLocal()))
+
+    # Sort by score desc, then start_time asc for stability, build items.
     items = []
-    for ues, ev, ch in rows:
+    for entry in sorted(by_event_id.values(),
+                        key=lambda e: (-e["score"], e["ev"].start_time)):
+        ev = entry["ev"]; ch = entry["ch"]
         # For "now": skip events with less than 10 min remaining.
         if context == "now" and (ev.end_time - now).total_seconds() < 600:
             continue
@@ -657,8 +709,8 @@ async def get_recommendations_from_scores(
             "end_time": ev.end_time.isoformat(),
             "genre": ev.genre,
             "progress_pct": _progress_pct(ev, now),
-            "match_score": round(ues.match_score, 2),
-            "reason": ues.reason or "",
+            "match_score": round(entry["score"], 2),
+            "reason": entry["reason"],
         })
         if len(items) >= limit:
             break
@@ -667,7 +719,8 @@ async def get_recommendations_from_scores(
         "context": context, "user_name": user_name,
         "taste_summary": "",
         "recommendations": items,
-        "cached": False, "cold_start": False,
+        "cached": False, "cold_start": not scored,
+        "regenerating": bool(unscored),
     }
 
 
