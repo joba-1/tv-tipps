@@ -136,7 +136,7 @@ LISTE:
 {cand_str}
 
 ANTWORT-FORMAT — exakt diese JSON-Struktur:
-{{"scores": [{{"i": <Index>, "score": <0.0..1.0>, "reason": "<ein kurzer Satz, der den Bezug zum Nutzer erklärt>"}}, ...]}}
+{{"scores": [{{"n": <Index>, "score": <0.0..1.0>, "reason": "<ein kurzer Satz, der den Bezug zum Nutzer erklärt>"}}, ...]}}
 Bewerte JEDEN Index aus der LISTE genau einmal. Begründungen müssen Profil/Likes/Dislikes/Historie referenzieren, NICHT die Sendung neutral beschreiben.
 """
 
@@ -153,7 +153,7 @@ def _parse_scoring_response(raw: dict | str | None) -> dict[int, tuple[float, st
         if not isinstance(it, dict):
             continue
         try:
-            idx = int(it.get("i") or it.get("index") or 0)
+            idx = int(it.get("n") or it.get("i") or it.get("index") or 0)
         except (TypeError, ValueError):
             continue
         if idx <= 0:
