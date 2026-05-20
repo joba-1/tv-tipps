@@ -54,7 +54,7 @@ def list_likes(
 
 
 @router.post("/api/likes/toggle")
-def toggle_like(
+async def toggle_like(
     req: LikeToggleRequest,
     tv_tipps_user: str | None = Cookie(default=None),
     db: Session = Depends(get_db),

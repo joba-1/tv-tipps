@@ -634,12 +634,12 @@
          x-show="modalEvent?.long_desc && modalEvent?.long_desc !== modalEvent?.short_desc"></p>
       <p x-show="modalEvent?.reason" class="modal-reason" x-text="modalEvent?.reason"></p>
       <footer class="modal-footer" x-show="modalEvent?.id">
-        <button :class="likedIds.has(modalEvent?.id) ? 'like-btn liked' : 'like-btn outline'"
+        <button :class="modalEvent && likedIds[modalEvent.id] ? 'like-btn liked' : 'like-btn outline'"
                 @click="toggleLike(modalEvent?.id)"
-                x-text="likedIds.has(modalEvent?.id) ? t('btn.unlike') : t('btn.like')"></button>
-        <button :class="dislikedIds.has(modalEvent?.id) ? 'dislike-btn disliked' : 'dislike-btn outline'"
+                x-text="modalEvent && likedIds[modalEvent.id] ? t('btn.unlike') : t('btn.like')"></button>
+        <button :class="modalEvent && dislikedIds[modalEvent.id] ? 'dislike-btn disliked' : 'dislike-btn outline'"
                 @click="toggleDislike(modalEvent?.id)"
-                x-text="dislikedIds.has(modalEvent?.id) ? t('btn.undislike') : t('btn.dislike')"></button>
+                x-text="modalEvent && dislikedIds[modalEvent.id] ? t('btn.undislike') : t('btn.dislike')"></button>
         <button x-show="modalSref && modalIsLive" class="watch-btn" @click="watchChannel(modalSref); closeModal()"
                 x-text="t('btn.watch')"></button>
         <button x-show="canRecord() && !findTimer(modalEvent)" class="record-btn"

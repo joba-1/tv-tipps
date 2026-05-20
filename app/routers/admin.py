@@ -295,7 +295,7 @@ def get_user_preferences(user: str, db: Session = Depends(get_db)):
 
 
 @router.post("/api/admin/user-preferences")
-def set_user_preferences(user: str, req: UserPreferencesRequest, db: Session = Depends(get_db)):
+async def set_user_preferences(user: str, req: UserPreferencesRequest, db: Session = Depends(get_db)):
     from app.models import RecommendationCache
     from app.services.profile import set_stated_preferences
     from app.services.scoring import mark_user_llm_rows_stale, schedule_rerate
@@ -414,7 +414,7 @@ class SessionAssignRequest(BaseModel):
 
 
 @router.post("/api/admin/sessions/{session_id}/assign")
-def assign_session(session_id: int, req: SessionAssignRequest, db: Session = Depends(get_db)):
+async def assign_session(session_id: int, req: SessionAssignRequest, db: Session = Depends(get_db)):
     from app.models import ViewingSession, RecommendationCache
     s = db.get(ViewingSession, session_id)
     if not s:

@@ -54,8 +54,10 @@ function tvApp() {
     _epgNeedsInitialScroll: true,
 
     // Likes / dislikes
-    likedIds: new Set(),
-    dislikedIds: new Set(),
+    // Plain objects (not Sets) — Alpine v3 reliably re-evaluates bindings on
+    // property access; Set.has() doesn't always trigger re-render in the modal.
+    likedIds: {},
+    dislikedIds: {},
 
     // Receivers
     receivers: [],
@@ -621,11 +623,17 @@ function tvApp() {
     async loadLikes() {
       try {
         const res = await fetch("/api/likes", { credentials: "include" });
-        if (!res.ok) { this.likedIds = new Set(); this.dislikedIds = new Set(); return; }
+        if (!res.ok) { this.likedIds = {}; this.dislikedIds = {}; return; }
         const data = await res.json();
-        this.likedIds    = new Set(data.filter(l => l.epg_event_id && l.sentiment !== "dislike").map(l => l.epg_event_id));
-        this.dislikedIds = new Set(data.filter(l => l.epg_event_id && l.sentiment === "dislike").map(l => l.epg_event_id));
-      } catch (_) { this.likedIds = new Set(); this.dislikedIds = new Set(); }
+        const liked = {}, disliked = {};
+        for (const l of data) {
+          if (!l.epg_event_id) continue;
+          if (l.sentiment === "dislike") disliked[l.epg_event_id] = true;
+          else                            liked[l.epg_event_id] = true;
+        }
+        this.likedIds = liked;
+        this.dislikedIds = disliked;
+      } catch (_) { this.likedIds = {}; this.dislikedIds = {}; }
     },
 
     async _toggleReaction(eventId, sentiment) {
@@ -639,14 +647,19 @@ function tvApp() {
         });
         if (!res.ok) return;
         const data = await res.json();
-        const nextLiked = new Set(this.likedIds);
-        const nextDisliked = new Set(this.dislikedIds);
-        if (data.liked) { nextLiked.add(eventId); nextDisliked.delete(eventId); }
-        else if (data.disliked) { nextDisliked.add(eventId); nextLiked.delete(eventId); }
-        else { nextLiked.delete(eventId); nextDisliked.delete(eventId); }
+        const nextLiked = { ...this.likedIds };
+        const nextDisliked = { ...this.dislikedIds };
+        if (data.liked) { nextLiked[eventId] = true; delete nextDisliked[eventId]; }
+        else if (data.disliked) { nextDisliked[eventId] = true; delete nextLiked[eventId]; }
+        else { delete nextLiked[eventId]; delete nextDisliked[eventId]; }
         this.likedIds = nextLiked;
         this.dislikedIds = nextDisliked;
+        // Score-backed recs return instantly — reload so the liked event
+        // jumps to top (explicit score=1.0) or the disliked one falls (0.0)
+        // without waiting for the next 120 s auto-refresh.
         this.recsData = null;
+        if (this.page === "recs") this.loadRecs();
+        if (this.page === "now" || this.page === "epg") this.loadRecsMap();
       } catch (_) {}
     },
 
