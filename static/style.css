@@ -62,6 +62,11 @@ nav details ul a {
 .state-dot.standby { background: #ffc107; }
 .state-dot.offline { background: #e53935; }
 .state-dot.off     { background: #555; }
+.state-dot.probing { background: #888; animation: dot-pulse 1.4s infinite ease-in-out; }
+@keyframes dot-pulse {
+  0%, 100% { opacity: 0.35; }
+  50%      { opacity: 1; }
+}
 
 .stale-banner {
   background: #5c3a00;

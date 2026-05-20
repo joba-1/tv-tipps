@@ -50,7 +50,7 @@
         <details class="dropdown">
           <summary>
             <span class="state-dot" x-show="selectedReceiver"
-                  :class="selectedReceiver ? (selectedReceiver.online ? (selectedReceiver.power_state==='on' ? 'online' : 'standby') : (selectedReceiver.power_state==='off' ? 'off' : 'offline')) : ''"></span>
+                  :class="selectedReceiver ? (selectedReceiver.probing ? 'probing' : (selectedReceiver.online ? (selectedReceiver.power_state==='on' ? 'online' : 'standby') : (selectedReceiver.power_state==='off' ? 'off' : 'offline'))) : ''"></span>
             <span x-text="selectedReceiver ? (selectedReceiver.location || selectedReceiver.name) : t('nav.receiver_label')"></span>
           </summary>
           <ul>
@@ -60,7 +60,7 @@
             <template x-for="r in receivers" :key="r.name">
               <li><a href="#" @click.prevent="setReceiver(r.name); $el.closest('details').removeAttribute('open')"
                      :style="selectedReceiver && selectedReceiver.name===r.name ? 'font-weight:bold' : ''">
-                <span class="state-dot" :class="r.online ? (r.power_state==='on' ? 'online' : 'standby') : (r.power_state==='off' ? 'off' : 'offline')"></span>
+                <span class="state-dot" :class="r.probing ? 'probing' : (r.online ? (r.power_state==='on' ? 'online' : 'standby') : (r.power_state==='off' ? 'off' : 'offline'))"></span>
                 <span x-text="r.location || r.name"></span>
               </a></li>
             </template>

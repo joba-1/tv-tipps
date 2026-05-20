@@ -37,14 +37,23 @@ class ReceiverCreateRequest(BaseModel):
 
 @router.get("/api/receivers")
 async def list_receivers(db: Session = Depends(get_db)):
-    from app.enigma.client import EnigmaClient
-    from config import settings
+    # No live probe — read the cached power_state the 45s poller writes. This
+    # keeps initial page load fast even when receivers are unreachable.
+    # The frontend refresh interval (30s) + poller (45s) keep the dot fresh.
+    from app.timezones import utcnow
+    rcfgs = get_receiver_configs(db)
+    now = utcnow()
     result = []
-    for rcfg in get_receiver_configs(db):
+    for rcfg in rcfgs:
         receiver = db.query(Receiver).filter_by(name=rcfg.name).first()
-        client = EnigmaClient(rcfg.ip, mock=settings.mock_receivers)
-        online = await client.is_online()
-        power_state = _infer_power_state(online, rcfg, receiver)
+        power_state = receiver.power_state if receiver else "unknown"
+        online = power_state in ("on", "standby")
+        # "probing" → DB state is too old to trust, the dot should pulse.
+        probing = (
+            receiver is None
+            or receiver.last_seen is None
+            or (now - receiver.last_seen).total_seconds() > 120
+        ) and online is False
         result.append({
             "name": rcfg.name,
             "ip": rcfg.ip,
@@ -60,8 +69,62 @@ async def list_receivers(db: Session = Depends(get_db)):
             "intertechno_device": rcfg.intertechno_device,
             "intertechno_url": rcfg.intertechno_url,
             "default_user": rcfg.default_user or None,
+            "probing": probing,
         })
     return result
+
+
+@router.get("/api/receivers/probe")
+async def probe_receivers(db: Session = Depends(get_db)):
+    """Live probe all receivers in parallel, update DB cache, return fresh
+    state. Used by the frontend right after the cheap /api/receivers call so
+    the dots flip from probing → real state within ~1.5 s of page load."""
+    import asyncio
+    from app.enigma.client import EnigmaClient
+    from app.timezones import utcnow
+    from config import settings
+
+    rcfgs = get_receiver_configs(db)
+    clients = [EnigmaClient(r.ip, mock=settings.mock_receivers) for r in rcfgs]
+
+    async def _probe(client: EnigmaClient) -> tuple[bool, str]:
+        if not await client.is_online():
+            return False, "unknown"
+        return True, await client.get_power_state()
+
+    results = await asyncio.gather(*(_probe(c) for c in clients))
+
+    now = utcnow()
+    out = []
+    for rcfg, (online, power_state) in zip(rcfgs, results):
+        receiver = db.query(Receiver).filter_by(name=rcfg.name).first()
+        if receiver:
+            receiver.power_state = power_state
+            if online:
+                receiver.last_seen = now
+        # When the live probe says "off"/"standby" but the receiver is
+        # unreachable, fall back to the same inference list_receivers uses.
+        if not online:
+            power_state = _infer_power_state(False, rcfg, receiver)
+        out.append({
+            "name": rcfg.name,
+            "ip": rcfg.ip,
+            "priority": rcfg.priority,
+            "has_genre": rcfg.has_genre,
+            "power_method": rcfg.power_method,
+            "location": rcfg.location,
+            "online": online or power_state in ("on", "standby"),
+            "power_state": power_state,
+            "last_seen": receiver.last_seen.isoformat() if receiver and receiver.last_seen else None,
+            "wol_mac": rcfg.wol_mac,
+            "intertechno_family": rcfg.intertechno_family,
+            "intertechno_device": rcfg.intertechno_device,
+            "intertechno_url": rcfg.intertechno_url,
+            "default_user": rcfg.default_user or None,
+            "probing": False,
+        })
+    db.commit()
+    return out
 
 
 @router.post("/api/admin/receivers")
@@ -219,14 +282,17 @@ async def ollama_stats_reset():
 
 @router.get("/api/admin/status", response_model=AdminStatus)
 async def admin_status(db: Session = Depends(get_db)):
+    import asyncio
     from app.enigma.client import EnigmaClient
     from config import settings
 
+    rcfgs = get_receiver_configs(db)
+    clients = [EnigmaClient(r.ip, mock=settings.mock_receivers) for r in rcfgs]
+    online_states = await asyncio.gather(*(c.is_online() for c in clients))
+
     receiver_statuses = []
-    for rcfg in get_receiver_configs(db):
+    for rcfg, client, online in zip(rcfgs, clients, online_states):
         receiver = db.query(Receiver).filter_by(name=rcfg.name).first()
-        client = EnigmaClient(rcfg.ip, mock=settings.mock_receivers)
-        online = await client.is_online()
         if online:
             power_state = await client.get_power_state()
             if receiver:

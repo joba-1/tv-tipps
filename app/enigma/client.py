@@ -59,8 +59,10 @@ class EnigmaClient:
             return None
 
     async def is_online(self) -> bool:
+        # Tight timeout because this fires on every page-load via /api/receivers
+        # and /api/remote/timers; a slow receiver shouldn't block the UI.
         try:
-            async with httpx.AsyncClient(timeout=httpx.Timeout(3.0)) as client:
+            async with httpx.AsyncClient(timeout=httpx.Timeout(1.5)) as client:
                 r = await client.head(f"{self.base_url}/api/about")
                 return r.status_code < 500
         except (httpx.RequestError, httpx.HTTPStatusError):

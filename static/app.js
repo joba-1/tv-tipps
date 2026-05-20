@@ -170,7 +170,11 @@ function tvApp() {
         if (document.visibilityState === "hidden") this._saveEpgAnchorNow();
       });
 
+      // Fast read from DB cache so the page renders immediately with
+      // pulsing "probing" dots on unknown boxes; then fire a live probe in
+      // the background so the dots flip to real state within ~1.5 s.
       await this.loadReceivers();
+      this.loadReceivers({ probe: true });
 
       const cookieUser = this._getCookie("tv_tipps_user");
       this.currentUser = this.users.find(u => u.slug === cookieUser) || this.users[0] || null;
@@ -202,9 +206,10 @@ function tvApp() {
 
     // ── Receivers / users ───────────────────────────────────────────────────
 
-    async loadReceivers() {
+    async loadReceivers({ probe = false } = {}) {
       try {
-        const res = await fetch("/api/receivers");
+        const url = probe ? "/api/receivers/probe" : "/api/receivers";
+        const res = await fetch(url);
         if (!res.ok) return;
         this.receivers = await res.json();
         if (this.users.length === 0) {

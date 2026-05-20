@@ -56,10 +56,14 @@ async def _find_receiver(preferred_name: str | None):
             if rcfg:
                 return rcfg, EnigmaClient(rcfg.ip, mock=settings.mock_receivers)
             return None, None
+        # Trust the cached power_state from the poller — avoids ~1.5s of probe
+        # latency per request. The caller still re-checks is_online before
+        # acting (zap, wake, timer fetch) so a wrong guess is harmless.
+        from app.models import Receiver
         for rcfg in get_receiver_configs(db):
-            client = EnigmaClient(rcfg.ip, mock=settings.mock_receivers)
-            if await client.is_online():
-                return rcfg, client
+            rcv = db.query(Receiver).filter_by(name=rcfg.name).first()
+            if rcv and rcv.power_state in ("on", "standby"):
+                return rcfg, EnigmaClient(rcfg.ip, mock=settings.mock_receivers)
     finally:
         db.close()
     return None, None
