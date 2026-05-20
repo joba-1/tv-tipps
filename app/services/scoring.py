@@ -708,11 +708,21 @@ async def get_recommendations_from_scores(
 
     # Background scoring for events we just rule-scored — next page hit gets
     # real LLM signal. Fire-and-forget; the scorer is idempotent and skips
-    # events that already have fresh rows.
+    # events that already have fresh rows. The task owns the lifetime of its
+    # own DB session so we don't leak connections back to the pool while the
+    # 20-30s LLM call is in flight.
     if unscored:
         user_obj = db.get(User, user_id)
         if user_obj:
-            asyncio.create_task(score_events_for_user(user_obj, unscored, SessionLocal()))
+            async def _bg():
+                bg_db = SessionLocal()
+                try:
+                    await score_events_for_user(user_obj, unscored, bg_db)
+                except Exception as e:
+                    log.warning("scoring.bg_failed", user_id=user_id, error=str(e))
+                finally:
+                    bg_db.close()
+            asyncio.create_task(_bg())
 
     # Sort by score desc, then start_time asc for stability, build items.
     items = []
