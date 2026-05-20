@@ -5,7 +5,8 @@ from sqlalchemy.orm import Session
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from app.models import Receiver, Channel, ChannelAvailability, Bouquet, BouquetChannel
 from app.enigma.client import EnigmaClient
-from app.enigma.parser import parse_all_services
+from app.enigma.parser import parse_all_services, EnigmaParseError
+from app.services.forensics import dump_failure
 from app.logging_setup import get_logger
 
 log = get_logger(__name__)
@@ -18,7 +19,14 @@ async def refresh_channels(receiver: Receiver, client: EnigmaClient, db: Session
         log.warning("channels.fetch_failed", receiver=receiver.name)
         return 0
 
-    bouquets = parse_all_services(raw)
+    try:
+        bouquets = parse_all_services(raw)
+    except EnigmaParseError as e:
+        dump_failure("enigma", tag=f"{receiver.name}_services",
+                     receiver=receiver.name, endpoint="getallservices",
+                     error=str(e), raw=raw)
+        log.warning("channels.parse_failed", receiver=receiver.name, error=str(e))
+        return 0
     now = datetime.utcnow()
     total_channels = 0
 

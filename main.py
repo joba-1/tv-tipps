@@ -1,7 +1,9 @@
 from contextlib import asynccontextmanager
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
+from fastapi.exceptions import RequestValidationError
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse, HTMLResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
+from starlette.exceptions import HTTPException as StarletteHTTPException
 from pathlib import Path
 from app.logging_setup import setup_logging, get_logger
 from app.database import init_db, SessionLocal
@@ -56,6 +58,28 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="tv-tipps", lifespan=lifespan)
+
+
+@app.exception_handler(Exception)
+async def _dump_unhandled(request: Request, exc: Exception):
+    """Last-resort catch for unhandled handler exceptions: dump the request
+    context to disk so we can investigate after the fact. HTTPException and
+    RequestValidationError have their own handlers and are not caught here."""
+    if isinstance(exc, (StarletteHTTPException, RequestValidationError)):
+        raise exc
+    from app.services.forensics import dump_failure
+    try:
+        body = (await request.body()).decode("utf-8", errors="replace")[:4096]
+    except Exception:
+        body = ""
+    dump_failure("request", tag=f"{request.method}_{request.url.path[:32]}",
+                 method=request.method, url=str(request.url),
+                 client=request.client.host if request.client else None,
+                 error=f"{type(exc).__name__}: {exc}",
+                 body=body)
+    log.error("request.unhandled", method=request.method,
+              path=request.url.path, error=str(exc))
+    return JSONResponse(status_code=500, content={"detail": "Internal server error"})
 
 # Routers
 from app.routers import now_next, epg, admin, recommendations, remote, i18n, likes  # noqa: E402

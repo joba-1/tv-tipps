@@ -2,13 +2,11 @@
 from __future__ import annotations
 import contextvars
 import json
-import os
 import threading
-import time
 from collections import defaultdict
-from pathlib import Path
 import httpx
 from app.logging_setup import get_logger
+from app.services.forensics import dump_failure
 from config import settings
 
 log = get_logger(__name__)
@@ -146,47 +144,6 @@ def reset_stats() -> None:
         _completion_stats.clear()
 
 
-# ── Parse-failure forensics ──────────────────────────────────────────────────
-# On every parse_failed we drop a self-contained {prompt, raw, error, ...}
-# JSON next to the DB so the offending payloads can be inspected after the
-# fact. Capped at _DUMP_KEEP files — oldest are pruned.
-_DUMP_KEEP = 30
-
-
-def _dump_dir() -> Path | None:
-    """Sibling of the SQLite DB (so it lives in /var/lib/tv-tipps in prod and
-    next to the dev DB locally). Returns None if creation fails."""
-    db = Path(settings.db_path)
-    base = db.parent if db.parent.as_posix() not in ("", ".") else Path.cwd()
-    d = base / "parse_failures"
-    try:
-        d.mkdir(parents=True, exist_ok=True)
-        return d
-    except OSError:
-        return None
-
-
-def _dump_parse_failure(caller: str, attempt: int, error: str, prompt: str, raw: str) -> None:
-    d = _dump_dir()
-    if d is None:
-        return
-    try:
-        ts = time.strftime("%Y%m%dT%H%M%S")
-        path = d / f"{ts}_{caller}_a{attempt}_{os.getpid()}.json"
-        path.write_text(json.dumps({
-            "ts": ts, "caller": caller, "attempt": attempt,
-            "error": error, "prompt": prompt, "raw": raw,
-        }, ensure_ascii=False, indent=2))
-        # Rotate: keep newest _DUMP_KEEP
-        files = sorted(d.glob("*.json"))
-        for old in files[:-_DUMP_KEEP]:
-            try:
-                old.unlink()
-            except OSError:
-                pass
-        log.info("ollama.parse_failure_dumped", path=str(path), caller=caller)
-    except OSError as e:
-        log.warning("ollama.parse_dump_failed", error=str(e), caller=caller)
 
 
 # ── Client ───────────────────────────────────────────────────────────────────
@@ -239,7 +196,9 @@ async def ask_json(prompt: str, caller: str = "unknown") -> dict | str | None:
         except (json.JSONDecodeError, ValueError) as e:
             log.warning("ollama.parse_failed", attempt=attempt, error=str(e),
                         raw_snippet=raw[:400], caller=caller)
-            _dump_parse_failure(caller, attempt, str(e), payload["prompt"], raw)
+            dump_failure("ollama", tag=f"{caller}_a{attempt}", caller=caller,
+                         attempt=attempt, error=str(e),
+                         prompt=payload["prompt"], raw=raw)
             if attempt == 0:
                 payload["prompt"] = (
                     prompt

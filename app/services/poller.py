@@ -83,8 +83,16 @@ async def _poll_receiver(receiver_name: str) -> None:
         state["last_successful_poll"] = now
         receiver.last_seen = now
 
-        from app.enigma.parser import parse_current
-        current = parse_current(raw_current)
+        from app.enigma.parser import parse_current, EnigmaParseError
+        try:
+            current = parse_current(raw_current)
+        except EnigmaParseError as e:
+            from app.services.forensics import dump_failure
+            dump_failure("enigma", tag=f"{receiver_name}_current",
+                         receiver=receiver_name, endpoint="getcurrent",
+                         error=str(e), raw=raw_current)
+            log.warning("poller.parse_failed", receiver=receiver_name, error=str(e))
+            return
         sref = current.sref if current else None
 
         if sref != state["last_sref"]:

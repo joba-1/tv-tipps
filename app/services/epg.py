@@ -7,7 +7,8 @@ from sqlalchemy.orm import Session
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from app.models import Channel, EpgEvent, Receiver, Bouquet
 from app.enigma.client import EnigmaClient
-from app.enigma.parser import parse_epg_events
+from app.enigma.parser import parse_epg_events, EnigmaParseError
+from app.services.forensics import dump_failure
 from app.timezones import utcnow
 from app.logging_setup import get_logger
 
@@ -37,7 +38,15 @@ async def refresh_now_next(receiver: Receiver, client: EnigmaClient, db: Session
             if raw is None:
                 continue
 
-            events = parse_epg_events(raw)
+            try:
+                events = parse_epg_events(raw)
+            except EnigmaParseError as e:
+                dump_failure("enigma", tag=f"{receiver.name}_epg{endpoint}",
+                             receiver=receiver.name, endpoint=f"epg{endpoint}",
+                             bref=bouquet.bref, error=str(e), raw=raw)
+                log.warning("epg.parse_failed", receiver=receiver.name,
+                            endpoint=endpoint, error=str(e))
+                continue
             for ev in events:
                 if ev.sref in seen_srefs and endpoint == "next":
                     pass  # allow next even if we saw now for same sref
@@ -93,7 +102,14 @@ async def refresh_epg_service(channel: Channel, client: EnigmaClient, db: Sessio
         return 0
 
     now = utcnow()
-    events = parse_epg_events(raw)
+    try:
+        events = parse_epg_events(raw)
+    except EnigmaParseError as e:
+        dump_failure("enigma", tag=f"epgservice_{channel.sref[:24]}",
+                     endpoint="epgservice", sref=channel.sref,
+                     error=str(e), raw=raw)
+        log.warning("epg.parse_failed_service", sref=channel.sref, error=str(e))
+        return 0
 
     # If very few events returned for a long window, box likely just booted — keep cached data
     if hours >= 12 and len(events) < 3:
