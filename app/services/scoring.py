@@ -35,6 +35,10 @@ log = get_logger(__name__)
 # How many events we send the LLM in a single batch. Sized so the JSON
 # response with one short reason per event stays under NUM_PREDICT (1500).
 _BATCH_SIZE = 50
+# Score threshold above which a match is "good" enough to show as a badge in
+# EPG / Now & Next lists. Below this we return None so the UI hides the chip.
+GOOD_MATCH_THRESHOLD = 0.7
+
 # Debounce window for like/dislike-triggered re-rates. Multiple clicks within
 # this window only kick off one background job.
 _DEBOUNCE_SEC = 60
@@ -223,6 +227,27 @@ def _upsert_scores(
         db.execute(stmt)
     db.commit()
     return len(triples)
+
+
+def good_scores_for_events(
+    user_id: int | None, event_ids: list[int], db: Session,
+) -> dict[int, float]:
+    """{ epg_event_id → match_score } for the events whose score for this user
+    is ≥ GOOD_MATCH_THRESHOLD. Missing events / weak scores / no user → no entry.
+    Used by /api/epg and /api/now-next to decorate list rows with a match
+    badge without making them request the full Tipps slate."""
+    if not user_id or not event_ids:
+        return {}
+    rows = (
+        db.query(UserEventScore.epg_event_id, UserEventScore.match_score)
+        .filter(
+            UserEventScore.user_id == user_id,
+            UserEventScore.epg_event_id.in_(event_ids),
+            UserEventScore.match_score >= GOOD_MATCH_THRESHOLD,
+        )
+        .all()
+    )
+    return {evid: float(score) for evid, score in rows}
 
 
 def _events_with_channels(event_ids: list[int], db: Session) -> list[tuple[EpgEvent, Channel]]:

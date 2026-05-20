@@ -14,6 +14,9 @@ class EpgEventOut(BaseModel):
     duration_sec: int | None
     genre: str | None
     progress_pct: float
+    # Only populated for events whose score for the current user is "good"
+    # (≥ 0.7). Lower scores → null so the UI can choose to show no badge.
+    match_score: float | None = None
 
 
 class NowNextOut(BaseModel):
@@ -40,6 +43,8 @@ class EpgRangeItem(BaseModel):
     duration_sec: int | None
     genre: str | None = None
     progress_pct: float
+    # Only populated for events with a good score (≥ 0.7) for the current user.
+    match_score: float | None = None
 
 
 class ReceiverStatus(BaseModel):

@@ -31,7 +31,6 @@ function tvApp() {
     // Cross-context match lookup: event_id → match_score (0..1). Built from all
     // four contexts so EPG / Now-Next can show the same badge when the AI also
     // picked that event in some Tips view.
-    recsMap: {},
 
     // Active recording timers indexed for fast lookup against an EPG event.
     // Keys: "eit:<event_id>" and "sref:<sref>:<rounded5min>" (covers ±2 min padding).
@@ -154,8 +153,8 @@ function tvApp() {
         // Entering EPG fresh → scroll to current programme on first load only;
         // periodic refreshes keep the user's scroll position intact.
         if (prevPage !== "epg" && this.page === "epg") this._epgNeedsInitialScroll = true;
-        if (this.page === "epg")    { this.loadEpg();     this.loadRecsMap(); this.loadTimers(); }
-        if (this.page === "now")    { this.loadNowNext(); this.loadRecsMap(); this.loadTimers(); }
+        if (this.page === "epg")    { this.loadEpg();     this.loadTimers(); }
+        if (this.page === "now")    { this.loadNowNext(); this.loadTimers(); }
         if (this.page === "recs")   { this.loadRecs();    this.loadTimers(); }
         if (this.page === "admin") { this.loadAdminStatus(); this.loadUnattributed(); }
         if (this.page === "remote") this._startScreenshotPoll();
@@ -198,8 +197,7 @@ function tvApp() {
       setInterval(() => this.loadReceivers(), 30_000);
       setInterval(() => {
         if (this.page === "recs") this.loadRecs();
-        if (this.page === "now")  { this.loadNowNext(); this.loadRecsMap(); }
-        if (this.page === "epg")  this.loadRecsMap();
+        if (this.page === "now")  this.loadNowNext();
         if (this.page === "epg" || this.page === "now" || this.page === "recs") this.loadTimers();
       }, 120_000);
     },
@@ -281,37 +279,6 @@ function tvApp() {
         clearTimeout(this._fastRecsTimer);
         this._fastRecsTimer = null;
       }
-    },
-
-    async loadRecsMap() {
-      // Aggregate AI picks across all contexts → { event_id: match_score }.
-      // All four calls hit warm caches (~5 ms each).
-      // Badge spans toggling can change row heights and shift the EPG list —
-      // anchor the topmost visible row so the user stays in place.
-      const anchor = this.page === "epg" ? this._recordEpgAnchor() : null;
-      const map = {};
-      const ctxs = ["now", "next", "prime", "today"];
-      await Promise.all(ctxs.map(async (ctx) => {
-        try {
-          const res = await fetch(`/api/recommendations?context=${ctx}`,
-                                  { credentials: "include" });
-          if (!res.ok) return;
-          const data = await res.json();
-          for (const r of (data.recommendations || [])) {
-            if (!r.id) continue;
-            // When the same event is picked in multiple contexts, keep the strongest match.
-            if (!(r.id in map) || r.match_score > map[r.id]) {
-              map[r.id] = r.match_score;
-            }
-          }
-        } catch (_) {}
-      }));
-      this.recsMap = map;
-      if (anchor) this.$nextTick(() => this._restoreEpgAnchor(anchor));
-    },
-
-    recsMatch(eventId) {
-      return this.recsMap[eventId];  // undefined → no badge
     },
 
     async loadTimers() {
@@ -664,7 +631,6 @@ function tvApp() {
         // without waiting for the next 120 s auto-refresh.
         this.recsData = null;
         if (this.page === "recs") this.loadRecs();
-        if (this.page === "now" || this.page === "epg") this.loadRecsMap();
       } catch (_) {}
     },
 
@@ -1043,12 +1009,11 @@ function tvApp() {
       this.currentUser = this.users.find(u => u.slug === slug) || this.users[0];
       document.cookie = `tv_tipps_user=${slug}; path=/; max-age=31536000; SameSite=Lax`;
       this.recsData = null;
-      this.recsMap = {};
       await this.loadLikes();
       // Timers are receiver-wide, not user-specific, so we don't reset timersMap.
       if (this.page === "recs") await this.loadRecs();
-      if (this.page === "now")  { await this.loadNowNext(); this.loadRecsMap(); }
-      if (this.page === "epg")  { await this.loadEpg();     this.loadRecsMap(); }
+      if (this.page === "now")  await this.loadNowNext();
+      if (this.page === "epg")  await this.loadEpg();
     },
 
     setReceiver(name) {

@@ -168,9 +168,9 @@
                    :style="'width:' + progressPct(ev) + '%'"></div>
             </div>
             <div class="event-channel" x-text="displayChannel(ev.channel_name)"></div>
-            <span class="event-match" x-show="recsMatch(ev.id) !== undefined"
-                  :class="recsMatch(ev.id) >= 0.75 ? 'high' : recsMatch(ev.id) >= 0.5 ? 'mid' : 'low'"
-                  x-text="t('label.match', { pct: Math.round((recsMatch(ev.id) || 0) * 100) })"></span>
+            <span class="event-match" x-show="ev.match_score != null"
+                  :class="ev.match_score >= 0.85 ? 'high' : 'mid'"
+                  x-text="t('label.match', { pct: Math.round((ev.match_score || 0) * 100) })"></span>
             <span class="event-timer-badge" x-show="findTimer(ev)" :title="t('label.timer_set')">⏺</span>
           </div>
           <div class="event-content">
@@ -225,9 +225,9 @@
                    :style="'width:' + progressPct(ev) + '%'"></div>
             </div>
             <div class="event-channel" x-text="displayChannel(ev.channel_name)"></div>
-            <span class="event-match" x-show="recsMatch(ev.id) !== undefined"
-                  :class="recsMatch(ev.id) >= 0.75 ? 'high' : recsMatch(ev.id) >= 0.5 ? 'mid' : 'low'"
-                  x-text="t('label.match', { pct: Math.round((recsMatch(ev.id) || 0) * 100) })"></span>
+            <span class="event-match" x-show="ev.match_score != null"
+                  :class="ev.match_score >= 0.85 ? 'high' : 'mid'"
+                  x-text="t('label.match', { pct: Math.round((ev.match_score || 0) * 100) })"></span>
             <span class="event-timer-badge" x-show="findTimer(ev)" :title="t('label.timer_set')">⏺</span>
           </div>
           <div class="event-content">

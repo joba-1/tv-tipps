@@ -53,7 +53,9 @@ def epg_range(
     now = utcnow()
     if start_dt < now:
         start_dt = now
-    return get_epg_range(channel_ids, start_dt, end_dt, db, future_only=False)
+    items = get_epg_range(channel_ids, start_dt, end_dt, db, future_only=False)
+    _decorate_with_match(items, user_id, db)
+    return items
 
 
 @router.get("/api/epg/search", response_model=list[EpgRangeItem])
@@ -106,4 +108,18 @@ def epg_search(
         d["sref"] = ch.sref
         d["channel_id"] = ch.id
         result.append(d)
+    _decorate_with_match(result, user_id, db)
     return result
+
+
+def _decorate_with_match(items: list[dict], user_id: int | None, db: Session) -> None:
+    """Populate match_score on each item if the user has a "good" stored score
+    (>= GOOD_MATCH_THRESHOLD). Items without a good score keep match_score=None
+    so the UI hides the chip."""
+    if not user_id or not items:
+        return
+    from app.services.scoring import good_scores_for_events
+    scores = good_scores_for_events(user_id, [i["id"] for i in items], db)
+    for item in items:
+        if item["id"] in scores:
+            item["match_score"] = scores[item["id"]]

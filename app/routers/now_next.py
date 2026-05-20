@@ -22,4 +22,19 @@ def now_next(
 
     channels = get_channels_for_user(user_id, db)
     channel_ids = [c.id for c in channels]
-    return get_now_next(channel_ids, db)
+    rows = get_now_next(channel_ids, db)
+
+    # Decorate now/next event rows with the stored match_score, but only
+    # surface "good" matches — the UI hides the badge otherwise.
+    from app.services.scoring import good_scores_for_events
+    event_ids = []
+    for r in rows:
+        if r.get("now"):  event_ids.append(r["now"]["id"])
+        if r.get("next"): event_ids.append(r["next"]["id"])
+    scores = good_scores_for_events(user_id, event_ids, db)
+    for r in rows:
+        for slot in ("now", "next"):
+            ev = r.get(slot)
+            if ev and ev["id"] in scores:
+                ev["match_score"] = scores[ev["id"]]
+    return rows
