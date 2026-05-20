@@ -239,13 +239,6 @@ nav details ul a {
 .event-match.high { color: #52b788; background: rgba(82, 183, 136, 0.18); }
 .event-match.mid  { color: #f4a261; background: rgba(244, 162, 97, 0.16); }
 .event-match.low  { color: #e07070; background: rgba(224, 112, 112, 0.16); }
-.event-kind-badge {
-  font-size: 0.7rem;
-  color: var(--pico-primary);
-  font-weight: 600;
-  letter-spacing: 0.04em;
-}
-
 .watch-btn {
   padding: 0.3rem 0.9rem;
   font-size: 0.85rem;

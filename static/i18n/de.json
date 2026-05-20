@@ -53,7 +53,6 @@
   "label.epg_4h": "Nächste 4h",
   "label.epg_tonight": "Heute Abend",
   "label.epg_all": "Alle",
-  "label.next_prefix": "Danach: ",
   "label.admin_channels": "Sender in DB: {n}",
   "label.admin_epg_events": "EPG-Events in DB: {n}",
   "label.prefs_heading": "Vorlieben",
