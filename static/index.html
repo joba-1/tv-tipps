@@ -176,8 +176,6 @@
           <div class="event-content">
             <div class="event-title-row">
               <span class="event-title" x-text="ev.title"></span>
-              <span class="event-kind-badge" x-show="ev._kind === 'next'"
-                    x-text="t('label.next_prefix')"></span>
             </div>
             <div class="event-desc" x-show="ev.short_desc || ev.long_desc"
                  x-text="ev.short_desc || ev.long_desc"></div>

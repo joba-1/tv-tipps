@@ -585,25 +585,32 @@ async def get_recommendations_from_scores(
     """Score-backed recs path. No LLM on the hot path — pure SQL + a small
     Python pass for freshness/progress. Falls back to a rule-based snapshot
     if the user has no stored scores yet (e.g., bootstrap still warming)."""
-    from datetime import datetime, timezone
+    from sqlalchemy import and_
     from app.timezones import prime_range, today_remaining_range
     from app.services.recommendations import (
-        _realtime_adjust_now, rule_based_rank, _epg_candidates,
-        _progress_pct, _DRIFT_REGEN_MIN,
+        rule_based_rank, _epg_candidates, _progress_pct,
     )
 
     now = utcnow()
 
+    # Each context defines a precise SQL window:
+    #   now    → already airing (start_time ≤ now < end_time)
+    #   next   → starts strictly after now, within 2 hours
+    #   prime  → starts inside tonight's prime window
+    #   today  → starts inside the remainder of today
     if context == "now":
-        win_start = now - timedelta(hours=4)
-        win_end   = now + timedelta(hours=4)
+        win_filter = and_(EpgEvent.start_time <= now, EpgEvent.end_time > now)
     elif context == "next":
-        win_start = now
-        win_end   = now + timedelta(hours=2)
+        win_filter = and_(EpgEvent.start_time > now,
+                          EpgEvent.start_time <= now + timedelta(hours=2))
     elif context == "prime":
         win_start, win_end = prime_range()
+        win_filter = and_(EpgEvent.start_time >= win_start,
+                          EpgEvent.start_time <  win_end)
     elif context == "today":
         win_start, win_end = today_remaining_range()
+        win_filter = and_(EpgEvent.start_time >= win_start,
+                          EpgEvent.start_time <  win_end)
     else:
         return {
             "context": context, "user_name": user_name, "taste_summary": "",
@@ -614,13 +621,9 @@ async def get_recommendations_from_scores(
         db.query(UserEventScore, EpgEvent, Channel)
         .join(EpgEvent, EpgEvent.id == UserEventScore.epg_event_id)
         .join(Channel, Channel.id == EpgEvent.channel_id)
-        .filter(
-            UserEventScore.user_id == user_id,
-            EpgEvent.start_time < win_end,
-            EpgEvent.end_time > (now if context == "now" else win_start),
-        )
+        .filter(UserEventScore.user_id == user_id, win_filter)
         .order_by(UserEventScore.match_score.desc(), EpgEvent.start_time)
-        .limit(limit * 3)  # over-fetch for the freshness filter
+        .limit(limit * 3)  # over-fetch for the "now" near-end filter
         .all()
     )
 
