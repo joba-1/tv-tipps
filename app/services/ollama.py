@@ -15,11 +15,17 @@ _TIMEOUT = httpx.Timeout(240.0)
 # can give temperature room for ranking variety without risking structure drift.
 # temperature=0.2 → still mostly deterministic on strong signals, lets ties between
 #                   similar-strength candidates break differently across calls.
-# num_ctx=16384   → fits prompts up to ~75% with the scaled-up contributors.
-# num_predict=1500 → upper bound on generated tokens (avoids run-away outputs;
-#                    scaled from observed completion peak ≈ 270 with safety margin).
-NUM_CTX = 16384
-NUM_PREDICT = 1500
+# num_ctx=8192    → max observed prompt is ~3,700 tokens; combined with the
+#                    raised num_predict that's ~6,500 in the worst case, leaving
+#                    ~1,600 headroom. Halved from 16384 to free ~2 GB of KV
+#                    cache for gemma3:4b without risking input truncation.
+# num_predict=2800 → upper bound on generated tokens. Calibrated from the
+#                    50-event scoring chunks: 35% of calls were hitting the old
+#                    1500 cap, and counting events emitted before truncation
+#                    extrapolated to ~2,500 tokens for a full response in the
+#                    verbose-reason case; 2800 leaves ~10% headroom.
+NUM_CTX = 8192
+NUM_PREDICT = 2800
 # Caller is overflowing when input alone exceeds ctx, or when the sum is within
 # this margin of ctx (Ollama silently truncates in either case).
 _CTX_SAFETY_MARGIN = 100
@@ -77,7 +83,12 @@ def _record(caller: str, prompt_tokens: int, completion_tokens: int, ctx: int) -
         _completion_stats[caller].add(completion_tokens)
     pct = round(100.0 * prompt_tokens / ctx, 1) if ctx else 0
     prompt_overflow = prompt_tokens > ctx
-    completion_truncated = (prompt_tokens + completion_tokens) >= (ctx - _CTX_SAFETY_MARGIN)
+    # Truncation can hit either the input context (ctx) or the output cap
+    # (num_predict). The ctx-budget check alone misses the common case where
+    # the response runs into the num_predict ceiling well before ctx is full.
+    ctx_full = (prompt_tokens + completion_tokens) >= (ctx - _CTX_SAFETY_MARGIN)
+    output_capped = completion_tokens >= (NUM_PREDICT - _CTX_SAFETY_MARGIN)
+    completion_truncated = ctx_full or output_capped
     _last_usage.set({
         "prompt_tokens": prompt_tokens,
         "completion_tokens": completion_tokens,

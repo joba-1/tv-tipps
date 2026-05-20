@@ -46,14 +46,20 @@ async def list_receivers(db: Session = Depends(get_db)):
     result = []
     for rcfg in rcfgs:
         receiver = db.query(Receiver).filter_by(name=rcfg.name).first()
-        power_state = receiver.power_state if receiver else "unknown"
-        online = power_state in ("on", "standby")
-        # "probing" → DB state is too old to trust, the dot should pulse.
+        cached_state = receiver.power_state if receiver else "unknown"
+        online = cached_state in ("on", "standby")
+        # Same inference probe_receivers applies on the response: intertechno
+        # boxes map to "off", WOL boxes to "standby" when unreachable, instead
+        # of the ambiguous "unknown" the HTTP probe records in the DB.
+        power_state = cached_state if online else _infer_power_state(False, rcfg, receiver)
+        # "probing" → DB state is too old to trust AND we have no reliable
+        # inference to fall back to. Intertechno→"off" and WOL→"standby" are
+        # definitive enough to skip pulsing.
         probing = (
             receiver is None
             or receiver.last_seen is None
             or (now - receiver.last_seen).total_seconds() > 120
-        ) and online is False
+        ) and online is False and power_state == "unknown"
         result.append({
             "name": rcfg.name,
             "ip": rcfg.ip,
