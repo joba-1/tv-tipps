@@ -136,27 +136,23 @@ LISTE:
 {cand_str}
 
 ANTWORT-FORMAT — exakt diese JSON-Struktur:
-{{"scores": [{{"n": <Index>, "score": <0.0..1.0>, "reason": "<ein kurzer Satz, der den Bezug zum Nutzer erklärt>"}}, ...]}}
-Bewerte JEDEN Index aus der LISTE genau einmal. Begründungen müssen Profil/Likes/Dislikes/Historie referenzieren, NICHT die Sendung neutral beschreiben.
+{{"scores": [{{"score": <0.0..1.0>, "reason": "<ein kurzer Satz, der den Bezug zum Nutzer erklärt>"}}, ...]}}
+Gib GENAU einen Eintrag pro Zeile in der LISTE aus, in DERSELBEN REIHENFOLGE wie die LISTE (Eintrag 1 = [1], Eintrag 2 = [2], usw.). Keine Index-Nummern in der Antwort. Begründungen müssen Profil/Likes/Dislikes/Historie referenzieren, NICHT die Sendung neutral beschreiben.
 """
 
 
-def _parse_scoring_response(raw: dict | str | None) -> dict[int, tuple[float, str]]:
-    """{ index_int → (score_0_to_1, reason) }. Tolerant to wrapped shapes."""
+def _parse_scoring_response(raw: dict | str | None) -> list[tuple[float, str]]:
+    """List of (score_0_to_1, reason) in response order. Caller matches them
+    positionally to the input chunk. Returning [] signals "unusable response"
+    so the caller can fall back / halve."""
     if not isinstance(raw, dict):
-        return {}
+        return []
     items = raw.get("scores") or raw.get("ranking") or []
     if not isinstance(items, list):
-        return {}
-    out: dict[int, tuple[float, str]] = {}
+        return []
+    out: list[tuple[float, str]] = []
     for it in items:
         if not isinstance(it, dict):
-            continue
-        try:
-            idx = int(it.get("n") or it.get("i") or it.get("index") or 0)
-        except (TypeError, ValueError):
-            continue
-        if idx <= 0:
             continue
         try:
             sc = float(it.get("score", 0.5))
@@ -164,7 +160,7 @@ def _parse_scoring_response(raw: dict | str | None) -> dict[int, tuple[float, st
             sc = 0.5
         sc = max(0.0, min(1.0, sc))
         reason = str(it.get("reason") or "").strip()[:240]
-        out[idx] = (sc, reason)
+        out.append((sc, reason))
     return out
 
 
@@ -338,27 +334,25 @@ async def _score_chunk(
 
     _mark_ai_alive()
     parsed = _parse_scoring_response(raw)
-    if not parsed:
-        # Often a JSON truncation — try once with half the batch before falling
-        # back to rule scores so we don't lose LLM signal on a large batch.
+    # Length mismatch = the model skipped or added an event. Without an index
+    # field we can no longer realign, so treat this as an unusable response
+    # and fall through to halve/retry — same as a hard parse failure.
+    if not parsed or len(parsed) != len(chunk):
         if len(chunk) > 12:
-            log.warning("scoring.parse_empty_halve", chunk=len(chunk))
+            log.warning("scoring.parse_mismatch_halve",
+                        chunk=len(chunk), got=len(parsed))
             half = len(chunk) // 2
             return (
                 await _score_chunk(user_name, profile, history, likes, dislikes, chunk[:half])
                 + await _score_chunk(user_name, profile, history, likes, dislikes, chunk[half:])
             )
-        log.warning("scoring.parse_empty_fallback_rule", chunk=len(chunk))
+        log.warning("scoring.parse_mismatch_fallback_rule",
+                    chunk=len(chunk), got=len(parsed))
         return [(ev.id, _rule_score(ev, ch), None, "rule") for ev, ch in chunk]
 
     triples: list[tuple[int, float, str | None, str]] = []
-    for i, (ev, ch) in enumerate(chunk):
-        score, reason = parsed.get(i + 1, (None, ""))
-        if score is None:
-            # LLM skipped this index — fill with rule so the row exists.
-            triples.append((ev.id, _rule_score(ev, ch), None, "rule"))
-        else:
-            triples.append((ev.id, score, reason or None, "llm"))
+    for (ev, ch), (score, reason) in zip(chunk, parsed):
+        triples.append((ev.id, score, reason or None, "llm"))
     return triples
 
 
