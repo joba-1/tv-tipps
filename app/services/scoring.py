@@ -137,8 +137,8 @@ LISTE:
 {cand_str}
 
 ANTWORT-FORMAT — exakt diese JSON-Struktur:
-{{"scores": [{{"score": <0.0..1.0>, "reason": "<max. 12 Wörter, Bezug zum Nutzer>"}}, ...]}}
-Gib GENAU {len(events)} Einträge aus — einen pro Zeile in der LISTE, in DERSELBEN REIHENFOLGE wie die LISTE (Eintrag 1 = [1], Eintrag 2 = [2], usw.). Keine Index-Nummern in der Antwort. `reason` ist max. 12 Wörter lang und referenziert Profil/Likes/Dislikes/Historie, NICHT die Sendung neutral.
+{{"scores": [{{"score": <0.0..1.0>, "reason": "<1–2 Sätze, Bezug zum Nutzer>"}}, ...]}}
+Gib GENAU {len(events)} Einträge aus — einen pro Zeile in der LISTE, in DERSELBEN REIHENFOLGE wie die LISTE (Eintrag 1 = [1], Eintrag 2 = [2], usw.). Keine Index-Nummern in der Antwort. `reason` referenziert Profil/Likes/Dislikes/Historie und erklärt den Bezug konkret — kein neutrales Beschreiben der Sendung, kein Geschwafel.
 """
 
 
@@ -160,7 +160,7 @@ def _parse_scoring_response(raw: dict | str | None) -> list[tuple[float, str]]:
         except (TypeError, ValueError):
             sc = 0.5
         sc = max(0.0, min(1.0, sc))
-        reason = str(it.get("reason") or "").strip()[:120]
+        reason = str(it.get("reason") or "").strip()[:240]
         out.append((sc, reason))
     return out
 
