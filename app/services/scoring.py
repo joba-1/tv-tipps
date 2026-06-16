@@ -32,9 +32,10 @@ from app.logging_setup import get_logger
 
 log = get_logger(__name__)
 
-# How many events we send the LLM in a single batch. Sized so the JSON
-# response with one short reason per event stays under NUM_PREDICT (1500).
-_BATCH_SIZE = 50
+# How many events we send the LLM in a single batch. Smaller batches keep the
+# JSON response well under NUM_PREDICT and reduce position-bias / parse-mismatch
+# halve-retries (see scoring.parse_mismatch_halve telemetry).
+_BATCH_SIZE = 20
 # Score threshold above which a match is "good" enough to show as a badge in
 # EPG / Now & Next lists. Below this we return None so the UI hides the chip.
 GOOD_MATCH_THRESHOLD = 0.7
@@ -136,8 +137,8 @@ LISTE:
 {cand_str}
 
 ANTWORT-FORMAT — exakt diese JSON-Struktur:
-{{"scores": [{{"score": <0.0..1.0>, "reason": "<ein kurzer Satz, der den Bezug zum Nutzer erklärt>"}}, ...]}}
-Gib GENAU einen Eintrag pro Zeile in der LISTE aus, in DERSELBEN REIHENFOLGE wie die LISTE (Eintrag 1 = [1], Eintrag 2 = [2], usw.). Keine Index-Nummern in der Antwort. Begründungen müssen Profil/Likes/Dislikes/Historie referenzieren, NICHT die Sendung neutral beschreiben.
+{{"scores": [{{"score": <0.0..1.0>, "reason": "<max. 12 Wörter, Bezug zum Nutzer>"}}, ...]}}
+Gib GENAU {len(events)} Einträge aus — einen pro Zeile in der LISTE, in DERSELBEN REIHENFOLGE wie die LISTE (Eintrag 1 = [1], Eintrag 2 = [2], usw.). Keine Index-Nummern in der Antwort. `reason` ist max. 12 Wörter lang und referenziert Profil/Likes/Dislikes/Historie, NICHT die Sendung neutral.
 """
 
 
@@ -159,7 +160,7 @@ def _parse_scoring_response(raw: dict | str | None) -> list[tuple[float, str]]:
         except (TypeError, ValueError):
             sc = 0.5
         sc = max(0.0, min(1.0, sc))
-        reason = str(it.get("reason") or "").strip()[:240]
+        reason = str(it.get("reason") or "").strip()[:120]
         out.append((sc, reason))
     return out
 
