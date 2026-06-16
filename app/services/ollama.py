@@ -1,5 +1,6 @@
 """Thin async wrapper around the local Ollama /api/generate endpoint."""
 from __future__ import annotations
+import asyncio
 import contextvars
 import json
 import threading
@@ -29,6 +30,19 @@ NUM_PREDICT = 5000
 # this margin of ctx (Ollama silently truncates in either case).
 _CTX_SAFETY_MARGIN = 100
 _OPTIONS = {"num_ctx": NUM_CTX, "num_predict": NUM_PREDICT, "temperature": 0.2}
+
+# Ollama serves one generation at a time per model; concurrent /api/generate
+# calls just queue server-side. Serialize on our side so a queued call doesn't
+# burn its httpx ReadTimeout waiting in Ollama's queue. The semaphore is
+# initialised lazily so it binds to the running event loop, not import time.
+_call_sema: asyncio.Semaphore | None = None
+
+
+def _get_sema() -> asyncio.Semaphore:
+    global _call_sema
+    if _call_sema is None:
+        _call_sema = asyncio.Semaphore(1)
+    return _call_sema
 
 
 # ── Usage stats ──────────────────────────────────────────────────────────────
@@ -171,10 +185,11 @@ async def ask_json(
         "options": _OPTIONS,
     }
     last_raw = ""
+    sema = _get_sema()
     for attempt in range(2):
         raw = ""
         try:
-            async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
+            async with sema, httpx.AsyncClient(timeout=_TIMEOUT) as client:
                 r = await client.post(f"{settings.ollama_url}/api/generate", json=payload)
                 r.raise_for_status()
                 body = r.json()
