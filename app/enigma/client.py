@@ -55,7 +55,10 @@ class EnigmaClient:
                 r.raise_for_status()
                 return r.json()
         except (httpx.RequestError, httpx.HTTPStatusError, ValueError) as e:
-            log.warning("enigma.request_failed", ip=self.ip, path=path, error=str(e))
+            # Demoted to info: receivers go offline routinely (Intertechno cut,
+            # deep standby) — _infer_power_state turns this into the UI's "off"
+            # state. Worth noting, not an error.
+            log.info("enigma.request_failed", ip=self.ip, path=path, error=repr(e))
             return None
 
     async def is_online(self) -> bool:
