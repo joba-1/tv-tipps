@@ -15,8 +15,10 @@ time window.
 from __future__ import annotations
 import asyncio
 import json
+import time
+from collections import deque
 from datetime import timedelta
-from sqlalchemy import select, delete, update
+from sqlalchemy import select, delete, update, func
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.orm import Session
 from app.database import SessionLocal
@@ -62,6 +64,12 @@ _rerate_handles: dict[int, asyncio.Task] = {}
 # True once we've seen a successful Ollama call. Used by the watcher to avoid
 # re-probing constantly when the model is responsive.
 _ai_seen_alive = False
+
+# Rolling window of (monotonic_ts, rows_written) per completed LLM batch, used
+# to compute a throughput-based ETA in the per-batch log line. Window kept short
+# so the rate stays responsive — bootstrap throughput is ~2 rows/s with very
+# low variance once gemma is warm.
+_throughput_window: deque[tuple[float, int]] = deque(maxlen=15)
 
 
 def _mark_ai_alive() -> None:
@@ -280,6 +288,39 @@ def _pending_event_ids_for_user(user_id: int, event_ids: list[int], db: Session)
     return [i for i in event_ids if i not in have]
 
 
+# ─── Throughput / ETA ───────────────────────────────────────────────────────
+
+def _record_throughput(rows: int) -> float | None:
+    """Push a completed batch into the rolling window and return rows/s.
+    Returns None until we have enough samples to be meaningful."""
+    if rows <= 0:
+        return None
+    _throughput_window.append((time.monotonic(), rows))
+    if len(_throughput_window) < 3:
+        return None
+    span = _throughput_window[-1][0] - _throughput_window[0][0]
+    if span <= 0:
+        return None
+    return sum(r for _, r in _throughput_window) / span
+
+
+def _count_global_pending(db: Session) -> int:
+    """Approximate count of scoring rows still to write across all users.
+    Total possible (users × future events) minus already-fresh score rows.
+    Ignores per-user channel filtering, so this slightly overestimates when
+    users see different channel subsets — fine for an ETA."""
+    now = utcnow()
+    n_users = db.query(func.count(User.id)).scalar() or 0
+    n_future = db.query(func.count(EpgEvent.id)).filter(EpgEvent.end_time > now).scalar() or 0
+    n_scored = (
+        db.query(func.count(UserEventScore.epg_event_id))
+        .join(EpgEvent, EpgEvent.id == UserEventScore.epg_event_id)
+        .filter(EpgEvent.end_time > now, UserEventScore.stale == False)  # noqa: E712
+        .scalar() or 0
+    )
+    return max(0, n_users * n_future - n_scored)
+
+
 # ─── Public scoring entry points ────────────────────────────────────────────
 
 async def score_events_for_user(
@@ -305,7 +346,16 @@ async def score_events_for_user(
     for chunk in _chunks(rows, _BATCH_SIZE):
         triples = await _score_chunk(user.name, profile, history, likes, dislikes, chunk)
         if triples:
-            written += _upsert_scores(user.id, triples, db)
+            n = _upsert_scores(user.id, triples, db)
+            written += n
+            rate = _record_throughput(n)
+            if rate:
+                pending = _count_global_pending(db)
+                log.info("scoring.batch_done",
+                         user_id=user.id, batch=n,
+                         rate_rows_s=round(rate, 2),
+                         pending=pending,
+                         eta_min=round(pending / rate / 60, 1))
     return written
 
 

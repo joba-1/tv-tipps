@@ -158,6 +158,7 @@ User=$SERVICE_USER
 WorkingDirectory=$APP_DIR
 EnvironmentFile=$ENV_FILE
 ExecStart=$APP_DIR/.venv/bin/uvicorn main:app --host 0.0.0.0 --port $PORT
+SyslogIdentifier=tv-tipps
 Restart=on-failure
 RestartSec=5
 
