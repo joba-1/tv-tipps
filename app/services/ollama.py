@@ -19,11 +19,12 @@ _TIMEOUT = httpx.Timeout(240.0)
 # num_ctx=16384   → prefix (~3,700) + 50-event LISTE (~2,500) + output (~1,400)
 #                    fits with ~9k headroom. VRAM cost ~2 GB KV cache extra vs
 #                    8192 — fine on the 16 GB GPU.
-# num_predict=3000 → measured output is ~39 tokens/event with the schema and
-#                    1–2-Satz reasons (50×39 ≈ 1950, hit the cap at 2000).
-#                    3000 leaves ~35 % headroom for users with chattier prefs.
+# num_predict=5000 → for batch=100, measured ~39 tokens/event under the schema
+#                    → ~3900 typical, 5000 leaves ~28 % headroom. Output gen
+#                    dominates wall time, so don't over-allocate (no extra cost
+#                    when unused but the cap protects against runaway responses).
 NUM_CTX = 16384
-NUM_PREDICT = 3000
+NUM_PREDICT = 5000
 # Caller is overflowing when input alone exceeds ctx, or when the sum is within
 # this margin of ctx (Ollama silently truncates in either case).
 _CTX_SAFETY_MARGIN = 100
@@ -195,10 +196,10 @@ async def ask_json(
                 log.info("ollama.ok", model=settings.ollama_model, attempt=attempt, caller=caller)
                 return result
         except (httpx.RequestError, httpx.HTTPStatusError) as e:
-            log.warning("ollama.request_failed", attempt=attempt, error=str(e), caller=caller)
+            log.warning("ollama.request_failed", attempt=attempt, error=repr(e), caller=caller)
             return None
         except (json.JSONDecodeError, ValueError) as e:
-            log.warning("ollama.parse_failed", attempt=attempt, error=str(e),
+            log.warning("ollama.parse_failed", attempt=attempt, error=repr(e),
                         raw_snippet=raw[:400], caller=caller)
             dump_failure("ollama", tag=f"{caller}_a{attempt}", caller=caller,
                          attempt=attempt, error=str(e),

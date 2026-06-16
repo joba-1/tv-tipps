@@ -34,9 +34,11 @@ log = get_logger(__name__)
 
 # How many events we send the LLM in a single batch. The JSON-Schema grammar
 # enforces exactly N entries, so the previous mismatch concern is gone — fewer
-# larger batches now win on overhead (the ~3000-token user prefix is re-eval'd
-# once per call). Sized against NUM_CTX=16384 with headroom.
-_BATCH_SIZE = 50
+# larger batches now win on overhead (the ~2400-token user prefix is re-eval'd
+# once per call). At batch=100: prompt ~7600 (~46 % of ctx), output ~3900.
+# Output generation dominates wall time, so going much larger has diminishing
+# returns — savings beyond ~100 are < 5 % per doubling.
+_BATCH_SIZE = 100
 # Score threshold above which a match is "good" enough to show as a badge in
 # EPG / Now & Next lists. Below this we return None so the UI hides the chip.
 GOOD_MATCH_THRESHOLD = 0.7
