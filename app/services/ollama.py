@@ -19,11 +19,11 @@ _TIMEOUT = httpx.Timeout(240.0)
 # num_ctx=16384   → prefix (~3,700) + 50-event LISTE (~2,500) + output (~1,400)
 #                    fits with ~9k headroom. VRAM cost ~2 GB KV cache extra vs
 #                    8192 — fine on the 16 GB GPU.
-# num_predict=2000 → grammar-constrained output is ~26 tokens per event with
-#                    minItems=maxItems schema; 50×26 + JSON braces ≈ 1400, so
-#                    2000 leaves ~40 % headroom without slowing inference.
+# num_predict=3000 → measured output is ~39 tokens/event with the schema and
+#                    1–2-Satz reasons (50×39 ≈ 1950, hit the cap at 2000).
+#                    3000 leaves ~35 % headroom for users with chattier prefs.
 NUM_CTX = 16384
-NUM_PREDICT = 2000
+NUM_PREDICT = 3000
 # Caller is overflowing when input alone exceeds ctx, or when the sum is within
 # this margin of ctx (Ollama silently truncates in either case).
 _CTX_SAFETY_MARGIN = 100
