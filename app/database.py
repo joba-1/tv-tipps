@@ -1,11 +1,18 @@
 from sqlalchemy import create_engine, event
 from sqlalchemy.orm import DeclarativeBase, sessionmaker
+from sqlalchemy.pool import NullPool
 from config import settings
 
 
+# NullPool: SQLite connections are file handles — cheap to open, no benefit from
+# pooling. The default QueuePool(size=5, overflow=10) exhausted in production
+# because long-running scoring Tasks hold a Session across many-second LLM
+# awaits, queueing up new EPG-ingest tasks behind 15 idle-but-checked-out
+# connections.
 engine = create_engine(
     f"sqlite:///{settings.db_path}",
     connect_args={"check_same_thread": False},
+    poolclass=NullPool,
 )
 
 
