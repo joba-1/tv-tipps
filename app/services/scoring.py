@@ -305,20 +305,31 @@ def _record_throughput(rows: int) -> float | None:
 
 
 def _count_global_pending(db: Session) -> int:
-    """Approximate count of scoring rows still to write across all users.
-    Total possible (users × future events) minus already-fresh score rows.
-    Ignores per-user channel filtering, so this slightly overestimates when
-    users see different channel subsets — fine for an ETA."""
+    """Count of scoring rows still to write across all users, with each user's
+    own channel filter applied (events outside their bouquet selection are not
+    pending — score_events_for_user skips them silently)."""
+    from app.services.channels import get_channels_for_user
     now = utcnow()
-    n_users = db.query(func.count(User.id)).scalar() or 0
-    n_future = db.query(func.count(EpgEvent.id)).filter(EpgEvent.end_time > now).scalar() or 0
-    n_scored = (
-        db.query(func.count(UserEventScore.epg_event_id))
-        .join(EpgEvent, EpgEvent.id == UserEventScore.epg_event_id)
-        .filter(EpgEvent.end_time > now, UserEventScore.stale == False)  # noqa: E712
-        .scalar() or 0
-    )
-    return max(0, n_users * n_future - n_scored)
+    total = 0
+    for user in db.query(User).all():
+        visible_ids = {c.id for c in get_channels_for_user(user.id, db)}
+        if not visible_ids:
+            continue
+        visible = db.query(func.count(EpgEvent.id)).filter(
+            EpgEvent.end_time > now,
+            EpgEvent.channel_id.in_(visible_ids),
+        ).scalar() or 0
+        scored = (
+            db.query(func.count(UserEventScore.epg_event_id))
+            .join(EpgEvent, EpgEvent.id == UserEventScore.epg_event_id)
+            .filter(
+                UserEventScore.user_id == user.id,
+                EpgEvent.end_time > now,
+                UserEventScore.stale == False,  # noqa: E712
+            ).scalar() or 0
+        )
+        total += max(0, visible - scored)
+    return total
 
 
 # ─── Public scoring entry points ────────────────────────────────────────────
