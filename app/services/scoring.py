@@ -32,10 +32,11 @@ from app.logging_setup import get_logger
 
 log = get_logger(__name__)
 
-# How many events we send the LLM in a single batch. Smaller batches keep the
-# JSON response well under NUM_PREDICT and reduce position-bias / parse-mismatch
-# halve-retries (see scoring.parse_mismatch_halve telemetry).
-_BATCH_SIZE = 20
+# How many events we send the LLM in a single batch. The JSON-Schema grammar
+# enforces exactly N entries, so the previous mismatch concern is gone — fewer
+# larger batches now win on overhead (the ~3000-token user prefix is re-eval'd
+# once per call). Sized against NUM_CTX=16384 with headroom.
+_BATCH_SIZE = 50
 # Score threshold above which a match is "good" enough to show as a badge in
 # EPG / Now & Next lists. Below this we return None so the UI hides the chip.
 GOOD_MATCH_THRESHOLD = 0.7
