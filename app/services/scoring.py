@@ -313,7 +313,30 @@ async def _score_chunk(
 ) -> list[tuple[int, float, str | None, str]]:
     """Score one batch via the LLM, fall back to rule-based on any failure."""
     prompt = _build_scoring_prompt(user_name, profile, history, likes, dislikes, chunk)
-    raw = await ask_json(prompt, caller="scoring")
+    # Hard-constrain the response shape: exactly len(chunk) entries, each with a
+    # numeric 0..1 score and a string reason. Prompt instructions alone were not
+    # enforcing the count — gemma4 reliably dropped one entry per batch.
+    n = len(chunk)
+    schema = {
+        "type": "object",
+        "properties": {
+            "scores": {
+                "type": "array",
+                "minItems": n,
+                "maxItems": n,
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "score": {"type": "number", "minimum": 0, "maximum": 1},
+                        "reason": {"type": "string"},
+                    },
+                    "required": ["score", "reason"],
+                },
+            },
+        },
+        "required": ["scores"],
+    }
+    raw = await ask_json(prompt, caller="scoring", format_schema=schema)
     if raw is None:
         _mark_ai_down()
         log.warning("scoring.llm_unavailable", chunk=len(chunk))

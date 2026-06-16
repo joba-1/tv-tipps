@@ -148,13 +148,20 @@ def reset_stats() -> None:
 
 # ── Client ───────────────────────────────────────────────────────────────────
 
-async def ask_json(prompt: str, caller: str = "unknown") -> dict | str | None:
+async def ask_json(
+    prompt: str,
+    caller: str = "unknown",
+    format_schema: dict | None = None,
+) -> dict | str | None:
     """POST prompt to Ollama. Returns:
       - dict: parsed JSON object
       - str:  raw text response when JSON parse fails (caller may salvage)
       - None: transport/HTTP failure
     Retries once on parse failure with a corrective hint.
     `caller` tags the call for the usage-stats endpoint (e.g. "recs", "i18n").
+    `format_schema`, if given, is a full JSON Schema passed to Ollama's `format`
+    field — grammar-constrains output shape (incl. array length via min/maxItems).
+    Falls back to plain `"json"` (any valid JSON object) when omitted.
     """
     payload: dict = {
         "model": settings.ollama_model,
@@ -162,7 +169,7 @@ async def ask_json(prompt: str, caller: str = "unknown") -> dict | str | None:
         "stream": False,
         # Grammar-constrain the model to valid JSON regardless of how chatty it is.
         # The prompt still dictates which keys/shape to produce.
-        "format": "json",
+        "format": format_schema if format_schema is not None else "json",
         "options": _OPTIONS,
     }
     last_raw = ""
