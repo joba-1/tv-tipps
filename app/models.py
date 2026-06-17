@@ -20,6 +20,9 @@ class Receiver(Base):
     intertechno_family: Mapped[str] = mapped_column(String(4), nullable=False, default="", server_default="")
     intertechno_device: Mapped[int] = mapped_column(Integer, nullable=False, default=1, server_default="1")
     intertechno_url: Mapped[str] = mapped_column(String(128), nullable=False, default="", server_default="")
+    # OpenWebif /api/powerstate?newstate=N value that puts THIS box into light
+    # standby. Differs by firmware: VTi (Vu+) uses 4, openATV (Octagon) uses 5.
+    standby_newstate: Mapped[int] = mapped_column(Integer, nullable=False, default=4, server_default="4")
     has_genre: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="0")
     default_user: Mapped[str | None] = mapped_column(String(64))
     power_state: Mapped[str | None] = mapped_column(String(32))  # on|standby|deep_standby|unknown

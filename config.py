@@ -15,6 +15,7 @@ class ReceiverConfig:
     intertechno_family: str = ""  # RF family letter, e.g. "A"
     intertechno_device: int = 1   # RF device number, e.g. 1
     intertechno_url: str = ""     # per-receiver gateway URL, overrides settings.intertechno_url
+    standby_newstate: int = 4     # OpenWebif newstate for light standby (VTi=4, openATV=5)
     location: str = ""            # human-readable room name, e.g. "Wohnzimmer"
 
 

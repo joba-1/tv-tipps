@@ -12,8 +12,6 @@ from app.logging_setup import get_logger
 
 log = get_logger(__name__)
 
-_NEWSTATE_STANDBY = 4   # OpenWebif light standby — network stays up, WOL still works
-
 PowerResult = tuple[bool, str | None]
 
 
@@ -39,20 +37,29 @@ async def _wol_wake(rcfg: ReceiverConfig) -> PowerResult:
         return False, f"WOL send failed: {e}"
 
 
-async def _wol_sleep(rcfg: ReceiverConfig) -> PowerResult:
-    """Put receiver into light standby via OpenWebif (WOL can still wake it)."""
-    url = f"http://{rcfg.ip}/api/powerstate?newstate={_NEWSTATE_STANDBY}"
+async def openwebif_standby(rcfg: ReceiverConfig) -> PowerResult:
+    """Put receiver into light standby via OpenWebif. Works regardless of
+    power_method as long as the box is currently reachable. `newstate` is
+    per-receiver (rcfg.standby_newstate) because firmwares differ — VTi uses 4,
+    openATV uses 5."""
+    url = f"http://{rcfg.ip}/api/powerstate?newstate={rcfg.standby_newstate}"
     try:
         async with httpx.AsyncClient(timeout=5) as client:
             resp = await client.get(url)
             if resp.status_code == 200:
-                log.info("power.standby_sent", receiver=rcfg.name, ok=True)
+                log.info("power.standby_sent", receiver=rcfg.name, ok=True,
+                         newstate=rcfg.standby_newstate)
                 return True, None
-            log.info("power.standby_sent", receiver=rcfg.name, ok=False, status=resp.status_code)
+            log.info("power.standby_sent", receiver=rcfg.name, ok=False,
+                     status=resp.status_code, newstate=rcfg.standby_newstate)
             return False, f"OpenWebif returned HTTP {resp.status_code}"
     except Exception as e:
         log.debug("power.standby_skipped", receiver=rcfg.name, reason="unreachable")
         return False, f"OpenWebif unreachable: {e}"
+
+
+# Backwards-compat alias — sleep_receiver still routes here for WOL boxes.
+_wol_sleep = openwebif_standby
 
 
 async def _intertechno_power(rcfg: ReceiverConfig, on: bool) -> PowerResult:

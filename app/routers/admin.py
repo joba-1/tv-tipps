@@ -544,7 +544,7 @@ def delete_like(like_id: int, db: Session = Depends(get_db)):
 
 @router.post("/api/admin/power")
 async def admin_power(receiver: str, action: str, db: Session = Depends(get_db)):
-    from app.services.power import wake_receiver, sleep_receiver
+    from app.services.power import wake_receiver, sleep_receiver, openwebif_standby
     rcfg = next((r for r in get_receiver_configs(db) if r.name == receiver), None)
     if not rcfg:
         raise HTTPException(404, f"Receiver '{receiver}' not found")
@@ -552,7 +552,12 @@ async def admin_power(receiver: str, action: str, db: Session = Depends(get_db))
         ok, reason = await wake_receiver(rcfg)
     elif action == "sleep":
         ok, reason = await sleep_receiver(rcfg)
+    elif action == "standby":
+        # Light standby via OpenWebif only — leaves mains on. Useful for
+        # Intertechno boxes where 'sleep' cuts mains and 'standby' keeps the
+        # network/EPG sweep alive while silencing HDMI.
+        ok, reason = await openwebif_standby(rcfg)
     else:
-        raise HTTPException(400, "action must be 'wake' or 'sleep'")
+        raise HTTPException(400, "action must be 'wake', 'sleep', or 'standby'")
     return {"ok": ok, "receiver": receiver, "action": action,
             "power_method": rcfg.power_method, "reason": reason}
