@@ -2,10 +2,10 @@
 from __future__ import annotations
 import asyncio
 from datetime import datetime
-from sqlalchemy import func
+from sqlalchemy import func, update
 from sqlalchemy.orm import Session
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
-from app.models import Channel, EpgEvent, Receiver, Bouquet
+from app.models import Channel, EpgEvent, Receiver, Bouquet, UserEventScore
 from app.enigma.client import EnigmaClient
 from app.enigma.parser import parse_epg_events, EnigmaParseError
 from app.services.forensics import dump_failure
@@ -15,6 +15,19 @@ from app.logging_setup import get_logger
 log = get_logger(__name__)
 
 _STALE_SECS = 3 * 3600  # 3 hours
+
+
+def _stale_scores_for_events(db: Session, event_ids: list[int]) -> int:
+    """Mark all user_event_scores rows for these events as stale so the next
+    scoring pass re-rates them. Returns number of rows touched."""
+    if not event_ids:
+        return 0
+    result = db.execute(
+        update(UserEventScore)
+        .where(UserEventScore.epg_event_id.in_(event_ids))
+        .values(stale=True)
+    )
+    return result.rowcount or 0
 
 
 async def refresh_now_next(receiver: Receiver, client: EnigmaClient, db: Session) -> int:
@@ -118,6 +131,24 @@ async def refresh_epg_service(channel: Channel, client: EnigmaClient, db: Sessio
     count = 0
     touched_keys: list[tuple[int, datetime]] = []
 
+    # Pre-fetch existing rows so we can detect changes to fields that the LLM
+    # prompt uses (genre, title, short_desc). When any of those changes — most
+    # importantly genre going from NULL to something after a richer receiver
+    # comes online — we mark the matching user_event_scores stale so they get
+    # re-rated against the better data.
+    start_times = [ev.start_time for ev in events]
+    existing = {
+        (row[0], row[1]): (row[2], row[3], row[4], row[5])
+        for row in db.query(
+            EpgEvent.channel_id, EpgEvent.start_time,
+            EpgEvent.id, EpgEvent.genre, EpgEvent.title, EpgEvent.short_desc,
+        ).filter(
+            EpgEvent.channel_id == channel.id,
+            EpgEvent.start_time.in_(start_times),
+        ).all()
+    }
+    changed_event_ids: list[int] = []
+
     for ev in events:
         stmt = (
             sqlite_insert(EpgEvent)
@@ -138,6 +169,8 @@ async def refresh_epg_service(channel: Channel, client: EnigmaClient, db: Sessio
             index_elements=["channel_id", "start_time"],
             set_={
                 "title": ev.title,
+                "short_desc": func.coalesce(stmt.excluded.short_desc, EpgEvent.short_desc),
+                "long_desc": func.coalesce(stmt.excluded.long_desc, EpgEvent.long_desc),
                 "end_time": ev.end_time,
                 "duration_sec": ev.duration_sec,
                 "event_id": ev.event_id,
@@ -150,11 +183,27 @@ async def refresh_epg_service(channel: Channel, client: EnigmaClient, db: Sessio
         touched_keys.append((channel.id, ev.start_time))
         count += 1
 
+        prev = existing.get((channel.id, ev.start_time))
+        if prev:
+            prev_id, prev_genre, prev_title, prev_short = prev
+            # Coalesce mirrors what the upsert actually stored.
+            post_genre = ev.genre if ev.genre is not None else prev_genre
+            post_short = ev.short_desc if ev.short_desc is not None else prev_short
+            if (post_genre != prev_genre
+                or ev.title != prev_title
+                or (post_short or "") != (prev_short or "")):
+                changed_event_ids.append(prev_id)
+
+    if changed_event_ids:
+        n = _stale_scores_for_events(db, changed_event_ids)
+        log.info("epg.stale_marked_on_change",
+                 channel=channel.name, events=len(changed_event_ids), rows=n)
+
     db.commit()
 
     # Resolve the (channel, start_time) pairs back to EpgEvent ids and fire a
-    # background scoring task. The scorer skips events that already have a
-    # fresh row, so retracing updated events here is harmless.
+    # background scoring task. The scorer scores stale rows and rows with no
+    # entry yet, so retracing updated events here is harmless.
     if touched_keys:
         ids = [
             row[0] for row in db.query(EpgEvent.id).filter(
