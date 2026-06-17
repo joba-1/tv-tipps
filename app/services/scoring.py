@@ -636,9 +636,17 @@ async def ai_availability_watcher() -> None:
 
 
 def _users_with_rule_rows(db: Session) -> list[int]:
+    """Users with rule-scored rows on still-future events. Past rule rows are
+    irrelevant — they won't be re-rated, so they must not keep the watcher
+    armed and probing Ollama every 90 s for nothing."""
+    now = utcnow()
     rows = (
         db.query(UserEventScore.user_id)
-        .filter(UserEventScore.source == "rule")
+        .join(EpgEvent, EpgEvent.id == UserEventScore.epg_event_id)
+        .filter(
+            UserEventScore.source == "rule",
+            EpgEvent.end_time > now,
+        )
         .distinct()
         .all()
     )
