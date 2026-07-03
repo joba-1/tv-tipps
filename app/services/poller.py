@@ -370,9 +370,27 @@ async def _refresh_all_channels() -> None:
         db.close()
 
 
+def _cleanup_old_sessions(retention_days: int, db: Session) -> int:
+    """Viewing sessions past the retention window no longer feed the profile
+    (30-day window) and only pin their EPG events against cleanup. Prune them
+    first so those events become deletable by the EPG retention query."""
+    from app.models import ViewingSession
+    cutoff = utcnow() - timedelta(days=retention_days)
+    n = (
+        db.query(ViewingSession)
+        .filter(ViewingSession.started_at < cutoff)
+        .delete(synchronize_session=False)
+    )
+    db.commit()
+    if n:
+        log.info("poller.session_cleanup", deleted=n, retention_days=retention_days)
+    return n
+
+
 async def _cleanup_epg() -> None:
     db = SessionLocal()
     try:
+        _cleanup_old_sessions(settings.session_retention_days, db)
         cleanup_old_events(settings.epg_retention_days, db)
     finally:
         db.close()

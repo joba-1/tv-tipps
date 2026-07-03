@@ -123,6 +123,7 @@ POLL_INTERVAL_SEC=45          # how often to check what each receiver is tuned t
 MIN_WATCH_SEC=300             # minimum seconds before a session is confirmed
 EPG_FULL_REFRESH_HOUR=3      # local hour for nightly full EPG refresh (cron)
 EPG_RETENTION_DAYS=30        # how long to keep EPG events in the DB
+SESSION_RETENTION_DAYS=90    # how long to keep viewing sessions (profile uses last 30 days)
 TIMEZONE=Europe/Berlin
 
 # ── Prime-time window ────────────────────────────────────────────────────────
@@ -290,7 +291,7 @@ Scheduled jobs run automatically:
 - EPG now/next: every hour
 - Full EPG: nightly at `EPG_FULL_REFRESH_HOUR`:30 local time
 - Channel list: every 24 hours
-- EPG cleanup: daily at 04:00 (removes events older than `EPG_RETENTION_DAYS`)
+- EPG cleanup: daily at 04:00 (removes viewing sessions older than `SESSION_RETENTION_DAYS`, then events older than `EPG_RETENTION_DAYS` and overlapping future duplicates)
 
 ---
 

@@ -41,6 +41,10 @@ class Settings(BaseSettings):
     min_watch_sec: int = 300
     epg_full_refresh_hour: int = 3
     epg_retention_days: int = 30
+    # Viewing sessions older than this are pruned nightly. They stop feeding
+    # the taste profile after 30 days anyway and only pin their EPG events
+    # against cleanup; keep a generous window for the admin activity view.
+    session_retention_days: int = 90
     timezone: str = "Europe/Berlin"
 
     # Prime-time window (local time, global for all users)
