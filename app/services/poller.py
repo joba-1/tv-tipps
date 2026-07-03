@@ -467,11 +467,15 @@ def start_scheduler() -> None:
         max_instances=1,
         coalesce=True,
     )
+    # NOTE: the job callable must be the coroutine function itself — a sync
+    # wrapper (lambda or def) runs in APScheduler's worker thread, where the
+    # returned coroutine is discarded un-awaited and create_task has no loop.
     scheduler.add_job(
-        lambda: _refresh_all_epg(full=True),
+        _refresh_all_epg,
         "cron",
         hour=settings.epg_full_refresh_hour,
         minute=30,
+        kwargs={"full": True},
         id="refresh_epg_full",
         max_instances=1,
         coalesce=True,
@@ -499,16 +503,14 @@ def start_scheduler() -> None:
         daily_rerate_stale, ai_availability_watcher, bootstrap_unscored,
     )
 
-    def _run_daily_rerate():
-        import asyncio as _aio
-        _aio.create_task(daily_rerate_stale())
-
     scheduler.add_job(
-        _run_daily_rerate,
+        daily_rerate_stale,
         "cron",
         hour=4,
         minute=15,
         id="rerate_stale",
+        max_instances=1,
+        coalesce=True,
     )
 
     scheduler.start()
