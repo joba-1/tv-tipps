@@ -1,14 +1,14 @@
 """EPG fetch, cache, and query."""
 from __future__ import annotations
-import asyncio
 from datetime import datetime
 from sqlalchemy import func, update
 from sqlalchemy.orm import Session
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from app.models import Channel, EpgEvent, Receiver, Bouquet, UserEventScore
 from app.enigma.client import EnigmaClient
-from app.enigma.parser import parse_epg_events, EnigmaParseError
+from app.enigma.parser import parse_epg_events, ParsedEpgEvent, EnigmaParseError
 from app.services.forensics import dump_failure
+from app.services.scoring import enqueue_scoring
 from app.timezones import utcnow
 from app.logging_setup import get_logger
 
@@ -30,112 +30,17 @@ def _stale_scores_for_events(db: Session, event_ids: list[int]) -> int:
     return result.rowcount or 0
 
 
-async def refresh_now_next(receiver: Receiver, client: EnigmaClient, db: Session) -> int:
-    """Fetch epgnow + epgnext for every bouquet on this receiver."""
-    bouquets = db.query(Bouquet).filter_by(receiver_id=receiver.id).all()
-    if not bouquets:
-        log.warning("epg.no_bouquets", receiver=receiver.name)
-        return 0
-
-    total = 0
-    now = utcnow()
-    seen_srefs: set[str] = set()
-
-    for bouquet in bouquets:
-        for endpoint in ("now", "next"):
-            if endpoint == "now":
-                raw = await client.get_epg_now(bouquet.bref)
-            else:
-                raw = await client.get_epg_next(bouquet.bref)
-
-            if raw is None:
-                continue
-
-            try:
-                events = parse_epg_events(raw)
-            except EnigmaParseError as e:
-                dump_failure("enigma", tag=f"{receiver.name}_epg{endpoint}",
-                             receiver=receiver.name, endpoint=f"epg{endpoint}",
-                             bref=bouquet.bref, error=str(e), raw=raw)
-                log.warning("epg.parse_failed", receiver=receiver.name,
-                            endpoint=endpoint, error=str(e))
-                continue
-            for ev in events:
-                if ev.sref in seen_srefs and endpoint == "next":
-                    pass  # allow next even if we saw now for same sref
-                seen_srefs.add(ev.sref)
-
-                channel = db.query(Channel).filter_by(sref=ev.sref).first()
-                if channel is None:
-                    continue
-
-                stmt = (
-                    sqlite_insert(EpgEvent)
-                    .values(
-                        channel_id=channel.id,
-                        event_id=ev.event_id,
-                        title=ev.title,
-                        short_desc=ev.short_desc,
-                        long_desc=ev.long_desc,
-                        start_time=ev.start_time,
-                        end_time=ev.end_time,
-                        duration_sec=ev.duration_sec,
-                        genre=ev.genre,
-                        cached_at=now,
-                    )
-                )
-                stmt = stmt.on_conflict_do_update(
-                    index_elements=["channel_id", "start_time"],
-                    set_={
-                        "title": ev.title,
-                        "short_desc": ev.short_desc,
-                        "long_desc": ev.long_desc,
-                        "end_time": ev.end_time,
-                        "duration_sec": ev.duration_sec,
-                        "event_id": ev.event_id,
-                        # Don't blank out a known genre with NULL — receivers
-                        # without has_genre return None even for events another
-                        # receiver already enriched.
-                        "genre": func.coalesce(stmt.excluded.genre, EpgEvent.genre),
-                        "cached_at": now,
-                    },
-                )
-                db.execute(stmt)
-                total += 1
-
-    db.commit()
-    log.info("epg.refreshed_now_next", receiver=receiver.name, events=total)
-    return total
-
-
-async def refresh_epg_service(channel: Channel, client: EnigmaClient, db: Session, hours: int = 24) -> int:
-    """Fetch full EPG for one channel. Skips update if response is sparse (box just booted)."""
-    raw = await client.get_epg_service(channel.sref, hours=hours)
-    if raw is None:
-        return 0
-
-    now = utcnow()
-    try:
-        events = parse_epg_events(raw)
-    except EnigmaParseError as e:
-        dump_failure("enigma", tag=f"epgservice_{channel.sref[:24]}",
-                     endpoint="epgservice", sref=channel.sref,
-                     error=str(e), raw=raw)
-        log.warning("epg.parse_failed_service", sref=channel.sref, error=str(e))
-        return 0
-
-    # If very few events returned for a long window, box likely just booted — keep cached data
-    if hours >= 12 and len(events) < 3:
-        return 0
-
-    count = 0
-    touched_keys: list[tuple[int, datetime]] = []
-
-    # Pre-fetch existing rows so we can detect changes to fields that the LLM
-    # prompt uses (genre, title, short_desc). When any of those changes — most
-    # importantly genre going from NULL to something after a richer receiver
-    # comes online — we mark the matching user_event_scores stale so they get
-    # re-rated against the better data.
+def _upsert_events(
+    channel: Channel, events: list[ParsedEpgEvent], db: Session, now: datetime,
+) -> tuple[int, list[int]]:
+    """Upsert parsed events for one channel and detect changes to the fields
+    the LLM prompt uses (genre, title, short_desc) on pre-existing rows — most
+    importantly genre going from NULL to something after a richer receiver
+    comes online. Known genre/desc values are never blanked out by a sparser
+    fetch (coalesce). Returns (upserted_count, changed_event_ids); the caller
+    stale-marks scores for the changed ids and commits."""
+    if not events:
+        return 0, []
     start_times = [ev.start_time for ev in events]
     existing = {
         (row[0], row[1]): (row[2], row[3], row[4], row[5])
@@ -148,6 +53,7 @@ async def refresh_epg_service(channel: Channel, client: EnigmaClient, db: Sessio
         ).all()
     }
     changed_event_ids: list[int] = []
+    count = 0
 
     for ev in events:
         stmt = (
@@ -174,13 +80,11 @@ async def refresh_epg_service(channel: Channel, client: EnigmaClient, db: Sessio
                 "end_time": ev.end_time,
                 "duration_sec": ev.duration_sec,
                 "event_id": ev.event_id,
-                # Preserve a previously-known genre when the new fetch lacks one.
                 "genre": func.coalesce(stmt.excluded.genre, EpgEvent.genre),
                 "cached_at": now,
             },
         )
         db.execute(stmt)
-        touched_keys.append((channel.id, ev.start_time))
         count += 1
 
         prev = existing.get((channel.id, ev.start_time))
@@ -194,6 +98,111 @@ async def refresh_epg_service(channel: Channel, client: EnigmaClient, db: Sessio
                 or (post_short or "") != (prev_short or "")):
                 changed_event_ids.append(prev_id)
 
+    return count, changed_event_ids
+
+
+def _enqueue_future_events(channel_id: int, start_times: list[datetime],
+                           now: datetime, db: Session) -> None:
+    """Resolve (channel, start_time) pairs back to ids of still-future events
+    and queue them for background scoring. The scorer skips rows that are
+    already fresh, so re-queueing merely-updated events is harmless."""
+    if not start_times:
+        return
+    ids = [
+        row[0] for row in db.query(EpgEvent.id).filter(
+            EpgEvent.channel_id == channel_id,
+            EpgEvent.start_time.in_(start_times),
+            EpgEvent.end_time > now,
+        ).all()
+    ]
+    if ids:
+        enqueue_scoring(ids)
+
+
+async def refresh_now_next(receiver: Receiver, client: EnigmaClient, db: Session) -> int:
+    """Fetch epgnow + epgnext for every bouquet on this receiver."""
+    bouquets = db.query(Bouquet).filter_by(receiver_id=receiver.id).all()
+    if not bouquets:
+        log.warning("epg.no_bouquets", receiver=receiver.name)
+        return 0
+
+    now = utcnow()
+    # Collect per channel, deduped by start_time — the same event shows up via
+    # multiple bouquets and via both endpoints at slot boundaries.
+    pending: dict[int, dict[datetime, ParsedEpgEvent]] = {}
+    channels: dict[int, Channel] = {}
+    by_sref: dict[str, Channel | None] = {}
+
+    for bouquet in bouquets:
+        for endpoint in ("now", "next"):
+            if endpoint == "now":
+                raw = await client.get_epg_now(bouquet.bref)
+            else:
+                raw = await client.get_epg_next(bouquet.bref)
+            if raw is None:
+                continue
+
+            try:
+                events = parse_epg_events(raw)
+            except EnigmaParseError as e:
+                dump_failure("enigma", tag=f"{receiver.name}_epg{endpoint}",
+                             receiver=receiver.name, endpoint=f"epg{endpoint}",
+                             bref=bouquet.bref, error=str(e), raw=raw)
+                log.warning("epg.parse_failed", receiver=receiver.name,
+                            endpoint=endpoint, error=str(e))
+                continue
+            for ev in events:
+                if ev.sref not in by_sref:
+                    by_sref[ev.sref] = db.query(Channel).filter_by(sref=ev.sref).first()
+                channel = by_sref[ev.sref]
+                if channel is None:
+                    continue
+                channels[channel.id] = channel
+                pending.setdefault(channel.id, {})[ev.start_time] = ev
+
+    total = 0
+    changed_event_ids: list[int] = []
+    for ch_id, evmap in pending.items():
+        count, changed = _upsert_events(channels[ch_id], list(evmap.values()), db, now)
+        total += count
+        changed_event_ids.extend(changed)
+
+    if changed_event_ids:
+        n = _stale_scores_for_events(db, changed_event_ids)
+        log.info("epg.stale_marked_on_change",
+                 receiver=receiver.name, events=len(changed_event_ids), rows=n)
+
+    db.commit()
+
+    for ch_id, evmap in pending.items():
+        _enqueue_future_events(ch_id, list(evmap.keys()), now, db)
+
+    log.info("epg.refreshed_now_next", receiver=receiver.name, events=total)
+    return total
+
+
+async def refresh_epg_service(channel: Channel, client: EnigmaClient, db: Session, hours: int = 24) -> int:
+    """Fetch full EPG for one channel. Skips update if response is sparse (box just booted)."""
+    raw = await client.get_epg_service(channel.sref, hours=hours)
+    if raw is None:
+        return 0
+
+    now = utcnow()
+    try:
+        events = parse_epg_events(raw)
+    except EnigmaParseError as e:
+        dump_failure("enigma", tag=f"epgservice_{channel.sref[:24]}",
+                     endpoint="epgservice", sref=channel.sref,
+                     error=str(e), raw=raw)
+        log.warning("epg.parse_failed_service", sref=channel.sref, error=str(e))
+        return 0
+
+    # If very few events returned for a long window, box likely just booted — keep cached data
+    if hours >= 12 and len(events) < 3:
+        return 0
+
+    count, changed_event_ids = _upsert_events(channel, events, db, now)
+
     if changed_event_ids:
         n = _stale_scores_for_events(db, changed_event_ids)
         log.info("epg.stale_marked_on_change",
@@ -201,20 +210,7 @@ async def refresh_epg_service(channel: Channel, client: EnigmaClient, db: Sessio
 
     db.commit()
 
-    # Resolve the (channel, start_time) pairs back to EpgEvent ids and fire a
-    # background scoring task. The scorer scores stale rows and rows with no
-    # entry yet, so retracing updated events here is harmless.
-    if touched_keys:
-        ids = [
-            row[0] for row in db.query(EpgEvent.id).filter(
-                EpgEvent.channel_id == channel.id,
-                EpgEvent.start_time.in_([k[1] for k in touched_keys]),
-                EpgEvent.end_time > now,
-            ).all()
-        ]
-        if ids:
-            from app.services.scoring import score_events_for_all_users
-            asyncio.create_task(score_events_for_all_users(ids))
+    _enqueue_future_events(channel.id, [ev.start_time for ev in events], now, db)
     return count
 
 

@@ -61,6 +61,12 @@ _AI_PROBE_CEILING_SEC = 30 * 60  # cap backoff at 30 min
 # like inside the debounce window resets the timer instead of stacking jobs.
 _rerate_handles: dict[int, asyncio.Task] = {}
 
+# Single ingest queue: producers (EPG refresh paths, recs stop-gap) enqueue
+# event-id batches; one scoring_worker drains them serially. Replaces the old
+# one-create_task-per-channel fan-out, which piled up hundreds of tasks each
+# holding a DB session during a full sweep.
+_score_queue: asyncio.Queue[list[int]] | None = None
+
 # True once we've seen a successful Ollama call. Used by the watcher to avoid
 # re-probing constantly when the model is responsive.
 _ai_seen_alive = False
@@ -332,6 +338,24 @@ def _count_global_pending(db: Session) -> int:
     return total
 
 
+# The exact pending count is log-only (ETA line) but costs a per-user query
+# loop, so cache it briefly and decrement by rows just written in between.
+_pending_cache: tuple[float, int] | None = None  # (monotonic_ts, count)
+_PENDING_TTL_SEC = 120
+
+
+def _global_pending(db: Session, just_written: int) -> int:
+    global _pending_cache
+    now = time.monotonic()
+    if _pending_cache and now - _pending_cache[0] < _PENDING_TTL_SEC:
+        cnt = max(0, _pending_cache[1] - just_written)
+        _pending_cache = (_pending_cache[0], cnt)
+        return cnt
+    cnt = _count_global_pending(db)
+    _pending_cache = (now, cnt)
+    return cnt
+
+
 # ─── Public scoring entry points ────────────────────────────────────────────
 
 async def score_events_for_user(
@@ -361,7 +385,7 @@ async def score_events_for_user(
             written += n
             rate = _record_throughput(n)
             if rate:
-                pending = _count_global_pending(db)
+                pending = _global_pending(db, just_written=n)
                 log.info("scoring.batch_done",
                          user_id=user.id, batch=n,
                          rate_rows_s=round(rate, 2),
@@ -574,8 +598,40 @@ async def _rerate_specific(user: User, event_ids: list[int], db: Session) -> int
 
 # ─── EPG ingest entry point ─────────────────────────────────────────────────
 
+def _get_score_queue() -> asyncio.Queue:
+    global _score_queue
+    if _score_queue is None:
+        _score_queue = asyncio.Queue()
+    return _score_queue
+
+
+def enqueue_scoring(event_ids: list[int]) -> None:
+    """Queue freshly-ingested event ids for background scoring. Cheap and
+    non-blocking — safe to call from any ingest path."""
+    if event_ids:
+        _get_score_queue().put_nowait(list(event_ids))
+
+
+async def scoring_worker() -> None:
+    """Single consumer for the ingest queue. Merges everything queued at wake-up
+    into one deduplicated pass so a full sweep's per-channel enqueues collapse
+    into few score_events_for_all_users calls."""
+    q = _get_score_queue()
+    while True:
+        merged = set(await q.get())
+        while not q.empty():
+            try:
+                merged.update(q.get_nowait())
+            except asyncio.QueueEmpty:
+                break
+        try:
+            await score_events_for_all_users(sorted(merged))
+        except Exception as e:
+            log.warning("scoring.worker_error", error=str(e))
+
+
 async def score_events_for_all_users(event_ids: list[int]) -> int:
-    """Called from refresh_epg_service after a batch of new/updated events lands.
+    """Rate a batch of new/updated events for every user.
     Runs sequentially across users so we don't pile up parallel LLM jobs."""
     if not event_ids:
         return 0

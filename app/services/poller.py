@@ -501,6 +501,7 @@ def start_scheduler() -> None:
     # future-event set.
     from app.services.scoring import (
         daily_rerate_stale, ai_availability_watcher, bootstrap_unscored,
+        scoring_worker,
     )
 
     scheduler.add_job(
@@ -516,6 +517,8 @@ def start_scheduler() -> None:
     scheduler.start()
     log.info("scheduler.started")
 
+    # Single consumer for the scoring ingest queue (EPG refresh paths enqueue).
+    asyncio.create_task(scoring_worker())
     # Background loop: upgrade any 'rule'-sourced score rows to LLM scores the
     # moment Ollama becomes reachable again — without waiting for the cron.
     asyncio.create_task(ai_availability_watcher())
