@@ -90,8 +90,8 @@ uvicorn main:app --reload --host 0.0.0.0 --port 8765
 
 - Model is configured in `OLLAMA_MODEL`; current default in this deployment is `qwen3.5:9b`. Any model that reliably emits JSON works.
 - Pull/check: `ollama pull qwen3.5:9b` · `curl -s $OLLAMA_URL/api/tags | jq '.models[].name'`.
-- Recs path: cached JSON (stale-while-revalidate) → `_realtime_adjust_now` filters expired items → rule-based fallback if Ollama is down or the cache drains. `regenerating: true` in the response triggers the client's fast-poll.
-- Cold-cache drain (every item expired) is a real production failure mode — keep the rule-based fallback wired in; don't return an empty list from `get_recommendations` for `context=now`.
+- Recs path (score-backed, since 2.3): EPG ingest enqueues events → a single `scoring_worker` batches them to the LLM → per-(user, event) rows in `user_event_scores`. `/api/recommendations` is pure SQL over those rows per context window; unscored events get an inline rule score plus a background enqueue, and `regenerating: true` triggers the client's fast-poll. There is no LLM call on the request path.
+- Keep the rule-based fallback (`_rule_score`) wired in — Ollama being down must degrade to rule-sourced rows (upgraded later by `ai_availability_watcher`), never to an empty Tipps list.
 - Translations: one-shot batch per new browser language, cached in the `translations` table. Curated `static/i18n/<lang>.json` always wins over AI entries.
 - If Ollama is unreachable the app logs `recs.llm_unavailable` / `i18n.batch_failed` and degrades gracefully — don't add retries or hard failures around it.
 - **Thinking models** (e.g. `qwen3.5:9b`) emit their JSON into the `thinking` field with `response=""` when `format=json` is set. `ask_json` falls back to `thinking` automatically — verify by checking `ollama.ok` events fire (not `ollama.parse_failed`).

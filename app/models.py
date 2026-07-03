@@ -171,17 +171,6 @@ class UserProfile(Base):
     summary_json: Mapped[str] = mapped_column(Text, nullable=False)
 
 
-class RecommendationCache(Base):
-    __tablename__ = "recommendation_cache"
-
-    id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False)
-    generated_at: Mapped[datetime] = mapped_column(nullable=False)
-    valid_until: Mapped[datetime] = mapped_column(nullable=False)
-    prompt_hash: Mapped[str] = mapped_column(String(64), nullable=False)
-    response: Mapped[str] = mapped_column(Text, nullable=False)
-
-
 class UserLike(Base):
     __tablename__ = "user_likes"
     __table_args__ = (UniqueConstraint("user_id", "epg_event_id"),)

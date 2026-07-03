@@ -368,15 +368,12 @@ def get_user_preferences(user: str, db: Session = Depends(get_db)):
 
 @router.post("/api/admin/user-preferences")
 async def set_user_preferences(user: str, req: UserPreferencesRequest, db: Session = Depends(get_db)):
-    from app.models import RecommendationCache
     from app.services.profile import set_stated_preferences
     from app.services.scoring import mark_user_llm_rows_stale, schedule_rerate
     u = db.query(User).filter_by(slug=user).first()
     if not u:
         return {"ok": False, "error": f"unknown user '{user}'"}
     set_stated_preferences(u.id, req.preferences, db)
-    db.query(RecommendationCache).filter_by(user_id=u.id).delete()
-    db.commit()
     # Preferences just changed → every existing LLM/rule score for this user
     # reflects the old profile. Mark stale + queue a debounced re-rate so the
     # new preferences propagate without waiting for the nightly cron.
@@ -487,7 +484,7 @@ class SessionAssignRequest(BaseModel):
 
 @router.post("/api/admin/sessions/{session_id}/assign")
 async def assign_session(session_id: int, req: SessionAssignRequest, db: Session = Depends(get_db)):
-    from app.models import ViewingSession, RecommendationCache
+    from app.models import ViewingSession
     s = db.get(ViewingSession, session_id)
     if not s:
         raise HTTPException(404, "session not found")
@@ -503,10 +500,9 @@ async def assign_session(session_id: int, req: SessionAssignRequest, db: Session
     else:
         s.user_id = None
         s.attribution_method = None
-    # Invalidate recs for both old and new owner so the next request re-ranks.
+    # Invalidate scores for both old and new owner so the next re-rate re-ranks.
     from app.services.scoring import mark_user_llm_rows_stale, schedule_rerate
     for uid in {old_uid, s.user_id} - {None}:
-        db.query(RecommendationCache).filter_by(user_id=uid).delete()
         mark_user_llm_rows_stale(uid, except_event_id=None, db=db)
         schedule_rerate(uid)
     db.commit()
@@ -515,27 +511,22 @@ async def assign_session(session_id: int, req: SessionAssignRequest, db: Session
 
 @router.delete("/api/admin/sessions/{session_id}")
 def delete_session(session_id: int, db: Session = Depends(get_db)):
-    from app.models import ViewingSession, RecommendationCache
+    from app.models import ViewingSession
     s = db.get(ViewingSession, session_id)
     if not s:
         raise HTTPException(404, "session not found")
-    user_id = s.user_id
     db.delete(s)
-    if user_id:
-        db.query(RecommendationCache).filter_by(user_id=user_id).delete()
     db.commit()
     return {"ok": True, "id": session_id}
 
 
 @router.delete("/api/admin/likes/{like_id}")
 def delete_like(like_id: int, db: Session = Depends(get_db)):
-    from app.models import UserLike, RecommendationCache
+    from app.models import UserLike
     l = db.get(UserLike, like_id)
     if not l:
         raise HTTPException(404, "like not found")
-    user_id = l.user_id
     db.delete(l)
-    db.query(RecommendationCache).filter_by(user_id=user_id).delete()
     db.commit()
     return {"ok": True, "id": like_id}
 

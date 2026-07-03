@@ -68,3 +68,12 @@ def _migrate():
                 conn.commit()
             except Exception:
                 pass  # column already exists
+        # recommendation_cache backed the LLM slate cache removed in 2.3 —
+        # recs are served from user_event_scores now.
+        try:
+            conn.execute(__import__("sqlalchemy").text(
+                "DROP TABLE IF EXISTS recommendation_cache"
+            ))
+            conn.commit()
+        except Exception:
+            pass

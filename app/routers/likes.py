@@ -4,7 +4,7 @@ from fastapi import APIRouter, Cookie, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from app.database import get_db
-from app.models import User, UserLike, EpgEvent, Channel, RecommendationCache
+from app.models import User, UserLike, EpgEvent, Channel
 from app.services.scoring import set_explicit_score, clear_explicit_score
 from app.timezones import utcnow
 
@@ -71,7 +71,6 @@ async def toggle_like(
         if existing.sentiment == req.sentiment:
             # same button pressed again → undo
             db.delete(existing)
-            db.query(RecommendationCache).filter_by(user_id=user.id).delete()
             db.commit()
             # Drop the explicit score override; the existing LLM/rule score
             # (or a future rerate) takes over again.
@@ -80,7 +79,6 @@ async def toggle_like(
         else:
             # switched sentiment → update in place
             existing.sentiment = req.sentiment
-            db.query(RecommendationCache).filter_by(user_id=user.id).delete()
             db.commit()
             set_explicit_score(user.id, req.epg_event_id,
                                liked=(req.sentiment == "like"), db=db)
@@ -100,7 +98,6 @@ async def toggle_like(
         sentiment=req.sentiment,
         created_at=utcnow(),
     ))
-    db.query(RecommendationCache).filter_by(user_id=user.id).delete()
     db.commit()
     # Only override THIS event's score for instant UI feedback. We do NOT
     # stale-mark other rows or trigger a rerate — a single like/dislike is a

@@ -23,7 +23,7 @@ from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.orm import Session
 from app.database import SessionLocal
 from app.models import (
-    UserEventScore, EpgEvent, Channel, User, UserLike,
+    UserEventScore, EpgEvent, Channel, User, UserLike, ViewingSession,
 )
 from app.services.profile import get_profile
 from app.services.channels import get_channels_for_user
@@ -468,13 +468,76 @@ async def _score_chunk(
     return triples
 
 
+# Prompt-context limits — sized so the user prefix (profile + history +
+# reactions) stays around ~2400 tokens of the scoring prompt.
+_HISTORY_LIMIT = 70
+_REACTION_LIMIT = 52
+
+
+def _get_recent_reactions(
+    user_id: int, db: Session, limit: int = _REACTION_LIMIT,
+) -> tuple[list[dict], list[dict]]:
+    """Return (likes, dislikes) as separate lists, most recent first."""
+    rows = (
+        db.query(UserLike)
+        .filter(UserLike.user_id == user_id)
+        .order_by(UserLike.created_at.desc())
+        .limit(limit * 2)
+        .all()
+    )
+    likes, dislikes = [], []
+    for r in rows:
+        entry = {"title": r.title, "channel": r.channel_name or "?", "genre": r.genre}
+        if r.sentiment == "dislike":
+            if len(dislikes) < limit:
+                dislikes.append(entry)
+        else:
+            if len(likes) < limit:
+                likes.append(entry)
+    return likes, dislikes
+
+
+def _get_recent_history(user_id: int, db: Session) -> list[dict]:
+    cutoff = utcnow() - timedelta(days=30)
+    sessions = (
+        db.query(ViewingSession)
+        .filter(
+            ViewingSession.user_id == user_id,
+            ViewingSession.confirmed == True,  # noqa: E712
+            ViewingSession.started_at >= cutoff,
+        )
+        .order_by(ViewingSession.started_at.desc())
+        .limit(_HISTORY_LIMIT)
+        .all()
+    )
+    history = []
+    for s in sessions:
+        ch = db.get(Channel, s.channel_id)
+        ev = db.get(EpgEvent, s.epg_event_id) if s.epg_event_id else None
+        history.append({
+            "title": ev.title if ev else "?",
+            "channel": ch.name if ch else "?",
+            "genre": ev.genre if ev else None,
+            "duration_min": (s.duration_sec or 0) / 60,
+        })
+    return history
+
+
 def _profile_context(user_id: int, db: Session) -> tuple[list[dict], list[dict], list[dict]]:
-    """Returns (history, likes, dislikes) using the same shape recommendations.py
-    builds — copied locally so the two modules don't have to import each other."""
-    from app.services.recommendations import _get_recent_history, _get_recent_reactions
+    """Returns (history, likes, dislikes) for the scoring prompt."""
     history = _get_recent_history(user_id, db)
     likes, dislikes = _get_recent_reactions(user_id, db)
     return history, likes, dislikes
+
+
+def _progress_pct(ev: EpgEvent, now) -> float:
+    """How far into the event we are (0..100). 0 for not-yet-started/no-duration."""
+    if not ev.duration_sec or ev.duration_sec <= 0:
+        return 0.0
+    elapsed = (now - ev.start_time).total_seconds()
+    if elapsed <= 0:
+        return 0.0
+    return round(min(100.0, elapsed / ev.duration_sec * 100), 1)
 
 
 def _chunks(seq: list, n: int):
@@ -775,9 +838,6 @@ async def get_recommendations_from_scores(
     if the user has no stored scores yet (e.g., bootstrap still warming)."""
     from sqlalchemy import and_
     from app.timezones import prime_range, today_remaining_range
-    from app.services.recommendations import (
-        rule_based_rank, _epg_candidates, _progress_pct,
-    )
 
     now = utcnow()
 

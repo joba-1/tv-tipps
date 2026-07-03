@@ -320,38 +320,6 @@ def _check_empty_epg(receiver: Receiver, channel_ids: set[int], db: Session) -> 
     # warm is redundant. Per-event scoring happens at EPG ingest, not here.
 
 
-_warming = False
-_WARM_CONTEXTS = ("now", "next", "prime", "today")
-
-
-async def _warm_recommendation_cache() -> None:
-    """Pre-generate recommendations for every user × every context. LLM cost
-    happens on this background path so user requests hit a warm cache. Calls
-    are serial (Ollama is single-threaded); overlapping invocations are skipped."""
-    global _warming
-    if _warming:
-        log.info("recs.warm_skip_already_running")
-        return
-    _warming = True
-    try:
-        from app.models import User
-        from app.services.recommendations import get_recommendations
-        db = SessionLocal()
-        try:
-            users = db.query(User).all()
-            for u in users:
-                for ctx in _WARM_CONTEXTS:
-                    try:
-                        await get_recommendations(u.id, u.name, ctx, db, force_refresh=True)
-                        log.info("recs.warmed", user=u.slug, context=ctx)
-                    except Exception as e:
-                        log.warning("recs.warm_failed", user=u.slug, context=ctx, error=str(e))
-        finally:
-            db.close()
-    finally:
-        _warming = False
-
-
 async def _refresh_all_channels() -> None:
     db = SessionLocal()
     try:

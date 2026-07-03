@@ -258,8 +258,8 @@ WHERE vs.confirmed = 1 GROUP BY u.name;
 # Translation cache
 SELECT lang, COUNT(*), MAX(generated_at) FROM translations GROUP BY lang;
 
-# Recommendation cache entries
-SELECT user_id, prompt_hash, valid_until FROM recommendation_cache;
+# Per-user event match scores (drive the Tipps page)
+SELECT user_id, source, COUNT(*) FROM user_event_scores GROUP BY user_id, source;
 
 # Liked events per user
 SELECT u.name, COUNT(*) FROM user_likes l
