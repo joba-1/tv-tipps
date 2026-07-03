@@ -22,7 +22,7 @@ Authoritative user/admin docs live in `docs/user-guide.md` and `docs/deploy.md` 
 ```bash
 source .venv/bin/activate
 pytest tests/ -q                  # unit + light integration; in-memory SQLite, no receivers/Ollama needed
-pytest tests/test_recommendations.py -q   # focused subset
+pytest tests/test_scoring.py -q   # focused subset (score pipeline)
 ```
 
 System smoke (against the running service):
