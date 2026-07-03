@@ -335,6 +335,12 @@
                   <span x-text="t('label.receiver_intertechno_url')"></span>
                   <input x-model="editReceiver.intertechno_url" placeholder="http://intertechnogw">
                 </label>
+                <label><span x-text="t('label.receiver_standby_newstate')"></span>
+                  <select x-model.number="editReceiver.standby_newstate">
+                    <option value="4">4 (VTi)</option>
+                    <option value="5">5 (openATV)</option>
+                  </select>
+                </label>
                 <label><span x-text="t('label.receiver_has_genre')"></span>
                   <input type="checkbox" role="switch" x-model="editReceiver.has_genre">
                 </label>
@@ -376,6 +382,12 @@
           </label>
           <label x-show="newReceiver.power_method === 'intertechno'"><span x-text="t('label.receiver_intertechno_url')"></span>
             <input x-model="newReceiver.intertechno_url" placeholder="http://intertechnogw">
+          </label>
+          <label><span x-text="t('label.receiver_standby_newstate')"></span>
+            <select x-model.number="newReceiver.standby_newstate">
+              <option value="4">4 (VTi)</option>
+              <option value="5">5 (openATV)</option>
+            </select>
           </label>
           <label><span x-text="t('label.receiver_has_genre')"></span>
             <input type="checkbox" role="switch" x-model="newReceiver.has_genre">

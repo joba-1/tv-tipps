@@ -214,6 +214,12 @@ The gateway controls a 433 MHz RF mains switch shared between the TV and a recei
 Manual on/off is available via the Admin page → Wake / Sleep buttons.
 **Automatic power scheduling is intentionally disabled** because the TV shares the circuit.
 
+### Light standby (standby_newstate)
+
+The Admin "Standby" action calls OpenWebif `/api/powerstate?newstate=N`. The correct
+`N` for light standby differs by firmware: **VTi (Vu+) uses 4, openATV (Octagon)
+uses 5**. Set it per receiver in the Admin page's edit form (default 4).
+
 ### Receiver location
 
 Set a `location=` flag on each receiver (e.g. `location=Wohnzimmer`) so watch toasts say

@@ -72,7 +72,7 @@ function tvApp() {
     activityOpen: {},    // slug → bool (details expanded)
     activityLoading: {}, // slug → bool
     unattributed: [],    // confirmed sessions with no user assigned
-    newReceiver: { name: "", ip: "", location: "", priority: 99, power_method: "none", wol_mac: "", intertechno_family: "", intertechno_device: 1, intertechno_url: "", has_genre: false },
+    newReceiver: { name: "", ip: "", location: "", priority: 99, power_method: "none", wol_mac: "", intertechno_family: "", intertechno_device: 1, intertechno_url: "", standby_newstate: 4, has_genre: false },
     editReceiver: { name: "" },
     newUser: { slug: "", name: "" },
 
@@ -811,7 +811,7 @@ function tvApp() {
         const data = await res.json();
         if (res.ok) {
           this.adminMsg = `✓ ${data.name} ${this.t("msg.receiver_added")}`;
-          this.newReceiver = { name: "", ip: "", location: "", priority: 99, power_method: "none", wol_mac: "", intertechno_family: "", intertechno_device: 1, intertechno_url: "", has_genre: false };
+          this.newReceiver = { name: "", ip: "", location: "", priority: 99, power_method: "none", wol_mac: "", intertechno_family: "", intertechno_device: 1, intertechno_url: "", standby_newstate: 4, has_genre: false };
           await this.loadReceivers();
         } else {
           this.adminMsg = `⚠️ ${data.detail || this.t("msg.refresh_error")}`;
@@ -840,6 +840,7 @@ function tvApp() {
         intertechno_family: r.intertechno_family || "",
         intertechno_device: r.intertechno_device ?? 1,
         intertechno_url: r.intertechno_url || "",
+        standby_newstate: r.standby_newstate ?? 4,
         has_genre: !!r.has_genre,
       };
     },

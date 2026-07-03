@@ -63,6 +63,8 @@ class ReceiverStatus(BaseModel):
     intertechno_family: str = ""
     intertechno_device: int = 1
     intertechno_url: str = ""
+    # OpenWebif newstate for light standby — firmware-specific (VTi=4, openATV=5)
+    standby_newstate: int = 4
 
 
 class AdminStatus(BaseModel):
