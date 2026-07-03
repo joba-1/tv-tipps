@@ -52,7 +52,7 @@ This is the main page. It shows a ranked list of programmes that match your tast
 | **Now** | Programmes currently on air |
 | **⏯ Up Next** | Programmes starting in the next 2 hours |
 | **Prime Time** | Tonight's prime-time window (20:00–23:00) |
-| **Today** | Everything airing from now until midnight |
+| **Today** | Everything airing from now until 04:00 (late-night shows count as today) |
 
 Switch context with the buttons at the top. The list refreshes automatically every 2 minutes.
 

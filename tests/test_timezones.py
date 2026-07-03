@@ -99,12 +99,17 @@ class TestTodayRemainingRange:
         now = utcnow()
         assert abs((start - now).total_seconds()) < 2
 
-    def test_end_is_future_midnight(self):
+    def test_end_is_next_4am_local(self):
+        from datetime import timezone as _tz_utc
+        from zoneinfo import ZoneInfo
+        from config import settings
         _, end = today_remaining_range()
         now = utcnow()
         assert end > now
-        # End should be within the next 24 hours
-        assert (end - now).total_seconds() <= 86400 + 60
+        # End should be within the next 28 hours (now just past 04:00 → 04:00 tomorrow)
+        assert (end - now).total_seconds() <= 28 * 3600 + 60
+        end_local = end.replace(tzinfo=_tz_utc.utc).astimezone(ZoneInfo(settings.timezone))
+        assert (end_local.hour, end_local.minute) == (4, 0)
 
     def test_end_after_start(self):
         start, end = today_remaining_range()

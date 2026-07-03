@@ -65,10 +65,13 @@ def prime_range() -> tuple[datetime, datetime]:
 
 
 def today_remaining_range() -> tuple[datetime, datetime]:
-    """Return (now, midnight_local) in naive UTC."""
+    """Return (now, next 04:00 local) in naive UTC. "Today" deliberately runs
+    past midnight — a late film starting at 23:50 belongs to this evening, and
+    between 00:00 and 04:00 the window covers the rest of the night instead
+    of collapsing to nothing."""
     tz = _tz()
-    midnight_local = (
-        datetime.now(tz).replace(hour=0, minute=0, second=0, microsecond=0)
-        + timedelta(days=1)
-    )
-    return utcnow(), midnight_local.astimezone(timezone.utc).replace(tzinfo=None)
+    now_local = datetime.now(tz)
+    end_local = now_local.replace(hour=4, minute=0, second=0, microsecond=0)
+    if end_local <= now_local:
+        end_local += timedelta(days=1)
+    return utcnow(), end_local.astimezone(timezone.utc).replace(tzinfo=None)
