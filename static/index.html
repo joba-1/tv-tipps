@@ -101,10 +101,12 @@
     <p x-show="recsData && recsData.taste_summary" class="taste-summary"
        x-text="recsData && recsData.taste_summary"></p>
 
-    <div x-show="loadingRecs" aria-busy="true" class="loading-center"
+    <!-- Spinner only while there is no data yet: background refreshes keep the
+         list rendered so the page height (and scroll position) never collapses. -->
+    <div x-show="loadingRecs && !recsData" aria-busy="true" class="loading-center"
          x-text="t('msg.loading_tips')"></div>
 
-    <div class="event-list" x-show="!loadingRecs">
+    <div class="event-list" x-show="recsData || !loadingRecs">
       <template x-for="(rec, idx) in (recsData && recsData.recommendations || [])"
                 :key="rec.sref + idx">
         <article class="event-row" :class="isLive(rec) ? 'live' : ''"
@@ -151,10 +153,10 @@
               x-text="t('btn.refresh')"></button>
     </div>
 
-    <div x-show="loadingNow" aria-busy="true" class="loading-center"
+    <div x-show="loadingNow && nowNext.length === 0" aria-busy="true" class="loading-center"
          x-text="t('msg.loading_epg')"></div>
 
-    <div class="event-list" x-show="!loadingNow">
+    <div class="event-list" x-show="nowNext.length > 0 || !loadingNow">
       <template x-for="ev in nowNextFlat" :key="ev.sref + ':' + ev._kind + ':' + ev.id">
         <article class="event-row" :class="isLive(ev) ? 'live' : ''"
                  :data-end="ev.end_time"
@@ -208,10 +210,10 @@
            x-model="epgSearchQuery" @input="debouncedEpgSearch()"
            :placeholder="t('label.epg_search')">
 
-    <div x-show="loadingEpg" aria-busy="true" class="loading-center"
+    <div x-show="loadingEpg && epgEvents.length === 0" aria-busy="true" class="loading-center"
          x-text="t('msg.loading_epg')"></div>
 
-    <div x-show="!loadingEpg" class="event-list">
+    <div x-show="epgEvents.length > 0 || !loadingEpg" class="event-list">
       <template x-for="ev in epgEvents" :key="ev.id">
         <article class="event-row epg-row" :class="isLive(ev) ? 'live' : ''"
                  :data-start="ev.start_time" :data-end="ev.end_time"

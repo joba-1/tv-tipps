@@ -5,6 +5,10 @@ function tvApp() {
     // Routing
     page: "recs",
 
+    // Reactive clock (updated every 60 s) so progress bars and live-state
+    // advance between data refreshes without refetching.
+    nowTick: Date.now(),
+
     // i18n
     lang: "de",
     i18nStrings: {},
@@ -166,7 +170,12 @@ function tvApp() {
       // schedule instead of jumping to "now" or to the top.
       window.addEventListener("scroll", () => this._scheduleSaveEpgAnchor(), { passive: true });
       window.addEventListener("visibilitychange", () => {
-        if (document.visibilityState === "hidden") this._saveEpgAnchorNow();
+        if (document.visibilityState === "hidden") {
+          this._saveEpgAnchorNow();
+        } else {
+          // Periodic refreshes pause while hidden — catch up once on return.
+          this._refreshCurrentPage();
+        }
       });
 
       // Fast read from DB cache so the page renders immediately with
@@ -194,12 +203,46 @@ function tvApp() {
 
       route();
 
-      setInterval(() => this.loadReceivers(), 30_000);
+      // Periodic refresh: receiver dots stay lively (30 s), page data is calm
+      // (5 min) — the boundary timer below reloads exactly when a displayed
+      // show ends, so lists roll over without frequent polling. Everything
+      // pauses while the tab is hidden; visibilitychange catches up on return.
+      setInterval(() => { if (!document.hidden) this.loadReceivers(); }, 30_000);
       setInterval(() => {
-        if (this.page === "recs") this.loadRecs();
-        if (this.page === "now")  this.loadNowNext();
-        if (this.page === "epg" || this.page === "now" || this.page === "recs") this.loadTimers();
-      }, 120_000);
+        if (!document.hidden) this._refreshCurrentPage({ receivers: false });
+      }, 300_000);
+      // Progress bars advance between refreshes via this reactive clock.
+      setInterval(() => { this.nowTick = Date.now(); }, 60_000);
+    },
+
+    _refreshCurrentPage({ receivers = true } = {}) {
+      if (receivers) this.loadReceivers();
+      if (this.page === "recs") this.loadRecs();
+      if (this.page === "now")  this.loadNowNext();
+      if (this.page === "epg")  this.loadEpg();
+      if (this.page === "epg" || this.page === "now" || this.page === "recs") this.loadTimers();
+    },
+
+    // Reload the current page's data shortly after the earliest end_time among
+    // the displayed events — a "now" list rolls over the moment a show ends
+    // instead of waiting for the 5-min interval. Re-armed on every data load.
+    _scheduleBoundaryRefresh(events) {
+      clearTimeout(this._boundaryTimer);
+      this._boundaryTimer = null;
+      const now = Date.now();
+      let next = Infinity;
+      for (const ev of events || []) {
+        const end = this._parseEventTime(ev?.end_time)?.getTime();
+        if (end && end > now && end < next) next = end;
+      }
+      if (!isFinite(next)) return;
+      this._boundaryTimer = setTimeout(() => {
+        this._boundaryTimer = null;
+        if (document.hidden) return;
+        if (this.page === "recs" || this.page === "now" || this.page === "epg") {
+          this._refreshCurrentPage({ receivers: false });
+        }
+      }, next - now + 10_000);
     },
 
     // ── Receivers / users ───────────────────────────────────────────────────
@@ -253,6 +296,7 @@ function tvApp() {
         );
         if (!res.ok) throw new Error(res.statusText);
         this.recsData = await res.json();
+        this._scheduleBoundaryRefresh(this.recsData?.recommendations);
         // Server says it's still warming an LLM ranking → poll faster until it lands.
         if (this.recsData?.regenerating && this.page === "recs") {
           this._scheduleFastRecsPoll();
@@ -447,6 +491,7 @@ function tvApp() {
         const res = await fetch("/api/now-next", { credentials: "include" });
         if (!res.ok) throw new Error(res.statusText);
         this.nowNext = await res.json();
+        this._scheduleBoundaryRefresh(this.nowNextFlat);
         this.staleBanner = this.nowNext.filter(ch => ch.stale).length > 1;
         this.lastRefresh = new Date().toLocaleTimeString(
           this.lang + "-" + this.lang.toUpperCase(),
@@ -476,6 +521,7 @@ function tvApp() {
         const res = await fetch(url, { credentials: "include" });
         if (!res.ok) throw new Error(res.statusText);
         this.epgEvents = await res.json();
+        this._scheduleBoundaryRefresh(this.epgEvents);
         if (this._epgNeedsInitialScroll) {
           this._epgNeedsInitialScroll = false;
           const saved = this._loadSavedEpgAnchor();
@@ -1033,27 +1079,33 @@ function tvApp() {
 
     // ── Helpers ──────────────────────────────────────────────────────────────
 
+    // Client-side time (nowTick) is preferred over the server's progress_pct
+    // snapshot so bars keep advancing between refreshes; the snapshot is only
+    // the fallback when timestamps are unparseable.
     isLive(event) {
       if (!event) return false;
-      if (typeof event.progress_pct === "number" && event.progress_pct > 0) return true;
       const start = this._parseEventTime(event.start_time);
       const end   = this._parseEventTime(event.end_time);
-      if (!start || !end) return false;
-      const now = Date.now();
-      return start.getTime() <= now && now < end.getTime();
+      if (start && end) {
+        const now = this.nowTick;
+        return start.getTime() <= now && now < end.getTime();
+      }
+      return typeof event.progress_pct === "number" && event.progress_pct > 0;
     },
 
     progressPct(event) {
       if (!event) return 0;
-      if (typeof event.progress_pct === "number" && event.progress_pct > 0) return event.progress_pct;
       const start = this._parseEventTime(event.start_time);
       const end   = this._parseEventTime(event.end_time);
-      if (!start || !end) return 0;
-      const now = Date.now();
-      const s = start.getTime(), e = end.getTime();
-      if (now <= s || e <= s) return 0;
-      if (now >= e) return 100;
-      return ((now - s) / (e - s)) * 100;
+      if (start && end) {
+        const now = this.nowTick;
+        const s = start.getTime(), e = end.getTime();
+        if (now <= s || e <= s) return 0;
+        if (now >= e) return 100;
+        return ((now - s) / (e - s)) * 100;
+      }
+      const p = event.progress_pct;
+      return typeof p === "number" && p > 0 ? p : 0;
     },
 
     get nowNextFlat() {
