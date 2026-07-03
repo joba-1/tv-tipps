@@ -930,9 +930,26 @@ async def get_recommendations_from_scores(
                     bg_db.close()
             asyncio.create_task(_bg())
 
+    # Parallel feeds: the same show airing simultaneously on several channels
+    # (e.g. ZDF + ZDFneo) would fill adjacent slots with duplicates. Keep one
+    # entry per (title, start_time) — highest score wins; on a tie the major
+    # channel survives (stronger viewer signal). Untitled events bypass dedupe.
+    def _major(entry: dict) -> bool:
+        return (entry["ch"].name or "").lower() in _MAJOR_CHANNELS
+
+    best_by_airing: dict[tuple, dict] = {}
+    for entry in by_event_id.values():
+        title = (entry["ev"].title or "").strip().lower()
+        key = (title, entry["ev"].start_time) if title else ("", entry["ev"].id)
+        cur = best_by_airing.get(key)
+        if (cur is None
+                or entry["score"] > cur["score"]
+                or (entry["score"] == cur["score"] and _major(entry) and not _major(cur))):
+            best_by_airing[key] = entry
+
     # Sort by score desc, then start_time asc for stability, build items.
     items = []
-    for entry in sorted(by_event_id.values(),
+    for entry in sorted(best_by_airing.values(),
                         key=lambda e: (-e["score"], e["ev"].start_time)):
         ev = entry["ev"]; ch = entry["ch"]
         # For "now": skip events with less than 10 min remaining.
