@@ -40,15 +40,18 @@ def seed_db() -> None:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    import asyncio
     log.info("startup.begin")
     init_db()
     seed_db()
 
-    # Initial data fetch on startup
     from app.services.poller import start_scheduler, run_refresh
-    await run_refresh("all")
-
     start_scheduler()
+    # Initial data fetch in the background: after a restart the in-memory
+    # sweep bookkeeping is empty, so this refresh escalates to a full
+    # per-channel EPG sweep — awaiting it here kept the app from serving
+    # HTTP for minutes.
+    asyncio.create_task(run_refresh("all"))
     log.info("startup.done")
     yield
 
