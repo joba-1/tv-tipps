@@ -309,11 +309,18 @@ async def admin_status(db: Session = Depends(get_db)):
     clients = [EnigmaClient(r.ip, mock=settings.mock_receivers) for r in rcfgs]
     online_states = await asyncio.gather(*(c.is_online() for c in clients))
 
+    async def _power(client: EnigmaClient, online: bool) -> str | None:
+        return await client.get_power_state() if online else None
+
+    power_states = await asyncio.gather(
+        *(_power(c, o) for c, o in zip(clients, online_states))
+    )
+
     receiver_statuses = []
-    for rcfg, client, online in zip(rcfgs, clients, online_states):
+    for rcfg, online, probed in zip(rcfgs, online_states, power_states):
         receiver = db.query(Receiver).filter_by(name=rcfg.name).first()
         if online:
-            power_state = await client.get_power_state()
+            power_state = probed
             if receiver:
                 receiver.power_state = power_state
         else:

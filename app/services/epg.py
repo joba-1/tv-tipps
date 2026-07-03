@@ -258,39 +258,54 @@ async def refresh_epg_service(channel: Channel, client: EnigmaClient, db: Sessio
 
 
 def get_now_next(channel_ids: list[int], db: Session) -> list[dict]:
-    """Return current + next event for each channel. channel_ids may be empty (→ all)."""
+    """Return current + next event for each channel. channel_ids may be empty (→ all).
+    Three set-based queries instead of two per channel."""
+    from sqlalchemy import tuple_
     now = utcnow()
-    result = []
 
     channels = (
         db.query(Channel).filter(Channel.id.in_(channel_ids)).all()
         if channel_ids
         else db.query(Channel).all()
     )
+    ids = [ch.id for ch in channels]
 
+    # Currently airing: ascending start order, so the last write per channel is
+    # the most recent start — matches the old per-channel DESC-first pick.
+    current_by_ch: dict[int, EpgEvent] = {}
+    for ev in (
+        db.query(EpgEvent)
+        .filter(
+            EpgEvent.channel_id.in_(ids),
+            EpgEvent.start_time <= now,
+            EpgEvent.end_time > now,
+        )
+        .order_by(EpgEvent.start_time.asc())
+        .all()
+    ):
+        current_by_ch[ev.channel_id] = ev
+
+    # Upcoming: earliest future start per channel, resolved in one tuple-IN fetch.
+    next_starts = (
+        db.query(EpgEvent.channel_id, func.min(EpgEvent.start_time))
+        .filter(EpgEvent.channel_id.in_(ids), EpgEvent.start_time > now)
+        .group_by(EpgEvent.channel_id)
+        .all()
+    )
+    next_by_ch: dict[int, EpgEvent] = {}
+    if next_starts:
+        for ev in (
+            db.query(EpgEvent)
+            .filter(tuple_(EpgEvent.channel_id, EpgEvent.start_time).in_(list(next_starts)))
+            .all()
+        ):
+            next_by_ch.setdefault(ev.channel_id, ev)
+
+    result = []
     for ch in channels:
-        current = (
-            db.query(EpgEvent)
-            .filter(
-                EpgEvent.channel_id == ch.id,
-                EpgEvent.start_time <= now,
-                EpgEvent.end_time > now,
-            )
-            .order_by(EpgEvent.start_time.desc())
-            .first()
-        )
-        nxt = (
-            db.query(EpgEvent)
-            .filter(
-                EpgEvent.channel_id == ch.id,
-                EpgEvent.start_time > now,
-            )
-            .order_by(EpgEvent.start_time.asc())
-            .first()
-        )
-
+        current = current_by_ch.get(ch.id)
+        nxt = next_by_ch.get(ch.id)
         stale = bool(current and (now - current.cached_at).total_seconds() > _STALE_SECS)
-
         result.append({
             "channel_id": ch.id,
             "channel_name": ch.name,

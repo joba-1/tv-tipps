@@ -8,6 +8,24 @@ log = get_logger(__name__)
 
 _TIMEOUT = httpx.Timeout(5.0)
 
+# One pooled client shared by all receivers (created lazily inside the running
+# loop, per-request timeouts). Closed from the app's lifespan shutdown.
+_client: httpx.AsyncClient | None = None
+
+
+def _get_client() -> httpx.AsyncClient:
+    global _client
+    if _client is None:
+        _client = httpx.AsyncClient()
+    return _client
+
+
+async def aclose() -> None:
+    global _client
+    if _client is not None:
+        await _client.aclose()
+        _client = None
+
 # RC key codes (Linux input event codes)
 RC_KEYS: dict[str, int] = {
     "power":  116,
@@ -50,10 +68,10 @@ class EnigmaClient:
             name = path.strip("/").replace("/", "_").split("?")[0]
             return self._load_fixture(name)
         try:
-            async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
-                r = await client.get(f"{self.base_url}{path}", params=params)
-                r.raise_for_status()
-                return r.json()
+            r = await _get_client().get(f"{self.base_url}{path}",
+                                        params=params, timeout=_TIMEOUT)
+            r.raise_for_status()
+            return r.json()
         except (httpx.RequestError, httpx.HTTPStatusError, ValueError) as e:
             # Demoted to info: receivers go offline routinely (Intertechno cut,
             # deep standby) — _infer_power_state turns this into the UI's "off"
@@ -65,9 +83,9 @@ class EnigmaClient:
         # Tight timeout because this fires on every page-load via /api/receivers
         # and /api/remote/timers; a slow receiver shouldn't block the UI.
         try:
-            async with httpx.AsyncClient(timeout=httpx.Timeout(1.5)) as client:
-                r = await client.head(f"{self.base_url}/api/about")
-                return r.status_code < 500
+            r = await _get_client().head(f"{self.base_url}/api/about",
+                                         timeout=httpx.Timeout(1.5))
+            return r.status_code < 500
         except (httpx.RequestError, httpx.HTTPStatusError):
             return False
 
@@ -165,15 +183,15 @@ class EnigmaClient:
             return None
         for params in ({}, {"format": "jpg"}):
             try:
-                async with httpx.AsyncClient(timeout=httpx.Timeout(10.0)) as client:
-                    r = await client.get(f"{self.base_url}/grab", params=params)
-                    r.raise_for_status()
-                    ct = r.headers.get("content-type", "")
-                    if ct.startswith("image/"):
-                        log.info("enigma.screenshot_ok", ip=self.ip, params=params, ct=ct, size=len(r.content))
-                        return r.content
-                    log.warning("enigma.screenshot_not_image", ip=self.ip, params=params,
-                                content_type=ct, body_preview=r.text[:120])
+                r = await _get_client().get(f"{self.base_url}/grab", params=params,
+                                            timeout=httpx.Timeout(10.0))
+                r.raise_for_status()
+                ct = r.headers.get("content-type", "")
+                if ct.startswith("image/"):
+                    log.info("enigma.screenshot_ok", ip=self.ip, params=params, ct=ct, size=len(r.content))
+                    return r.content
+                log.warning("enigma.screenshot_not_image", ip=self.ip, params=params,
+                            content_type=ct, body_preview=r.text[:120])
             except (httpx.RequestError, httpx.HTTPStatusError) as e:
                 log.warning("enigma.screenshot_failed", ip=self.ip, params=params, error=str(e))
         return None

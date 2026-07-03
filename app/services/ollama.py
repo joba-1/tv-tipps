@@ -45,6 +45,25 @@ def _get_sema() -> asyncio.Semaphore:
     return _call_sema
 
 
+# One pooled client for all Ollama calls (created lazily inside the running
+# loop); closed from the app's lifespan shutdown.
+_client: httpx.AsyncClient | None = None
+
+
+def _get_client() -> httpx.AsyncClient:
+    global _client
+    if _client is None:
+        _client = httpx.AsyncClient(timeout=_TIMEOUT)
+    return _client
+
+
+async def aclose() -> None:
+    global _client
+    if _client is not None:
+        await _client.aclose()
+        _client = None
+
+
 # ── Usage stats ──────────────────────────────────────────────────────────────
 # Per-caller running counters for prompt + completion tokens reported by Ollama.
 # Reset on process restart; query via /api/admin/ollama-stats.
@@ -189,7 +208,8 @@ async def ask_json(
     for attempt in range(2):
         raw = ""
         try:
-            async with sema, httpx.AsyncClient(timeout=_TIMEOUT) as client:
+            async with sema:
+                client = _get_client()
                 r = await client.post(f"{settings.ollama_url}/api/generate", json=payload)
                 r.raise_for_status()
                 body = r.json()

@@ -81,7 +81,9 @@ def epg_search(
 
     now = utcnow()
     end = now + timedelta(days=days)
-    pattern = f"%{q.lower()}%"
+    # Escape LIKE wildcards so a literal '%'/'_' in the query matches itself.
+    escaped = q.lower().replace("\\", "\\\\").replace("%", r"\%").replace("_", r"\_")
+    pattern = f"%{escaped}%"
 
     rows = (
         db.query(EpgEvent, Channel)
@@ -91,9 +93,9 @@ def epg_search(
             EpgEvent.end_time > now,
             EpgEvent.start_time < end,
             or_(
-                func.lower(EpgEvent.title).like(pattern),
-                func.lower(EpgEvent.short_desc).like(pattern),
-                func.lower(EpgEvent.long_desc).like(pattern),
+                func.lower(EpgEvent.title).like(pattern, escape="\\"),
+                func.lower(EpgEvent.short_desc).like(pattern, escape="\\"),
+                func.lower(EpgEvent.long_desc).like(pattern, escape="\\"),
             ),
         )
         .order_by(EpgEvent.start_time.asc())

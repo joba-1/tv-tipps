@@ -57,6 +57,10 @@ async def lifespan(app: FastAPI):
 
     from app.services.poller import scheduler
     scheduler.shutdown(wait=False)
+    from app.services import ollama as _ollama
+    from app.enigma import client as _enigma_client
+    await _ollama.aclose()
+    await _enigma_client.aclose()
     log.info("shutdown.done")
 
 
@@ -118,12 +122,25 @@ async def apple_touch_icon():
     return HTMLResponse(status_code=404)
 
 
-@app.get("/{full_path:path}", include_in_schema=False)
-async def serve_spa(full_path: str):
+# Version-substituted shell rendered once at startup — index.html only changes
+# with a deploy (which restarts the process). Dev note: editing index.html
+# needs a process restart to show; app.js/style.css are served fresh via
+# /static.
+def _render_index() -> str | None:
     index = static_dir / "index.html"
     if not index.exists():
-        return {"detail": "Frontend not built yet"}
+        return None
     html = index.read_text()
     html = html.replace('href="/static/style.css"', f'href="/static/style.css?v={_version}"')
     html = html.replace('src="/static/app.js"', f'src="/static/app.js?v={_version}"')
-    return HTMLResponse(html, headers={"Cache-Control": "no-cache"})
+    return html
+
+
+_index_html = _render_index()
+
+
+@app.get("/{full_path:path}", include_in_schema=False)
+async def serve_spa(full_path: str):
+    if _index_html is None:
+        return {"detail": "Frontend not built yet"}
+    return HTMLResponse(_index_html, headers={"Cache-Control": "no-cache"})

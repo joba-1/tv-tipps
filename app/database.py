@@ -1,4 +1,4 @@
-from sqlalchemy import create_engine, event
+from sqlalchemy import create_engine, event, text
 from sqlalchemy.orm import DeclarativeBase, sessionmaker
 from sqlalchemy.pool import NullPool
 from config import settings
@@ -46,7 +46,9 @@ def init_db():
 
 
 def _migrate():
-    """Add columns that were introduced after the initial schema."""
+    """Add columns introduced after the initial schema; drop removed tables.
+    Existing columns are detected via PRAGMA instead of swallowing the ALTER
+    error, so genuine DDL failures (locked DB, disk full) stay visible."""
     new_columns = [
         ("receivers", "location",     "VARCHAR(128) NOT NULL DEFAULT ''"),
         ("receivers", "priority",     "INTEGER NOT NULL DEFAULT 99"),
@@ -60,20 +62,16 @@ def _migrate():
         ("user_likes",  "sentiment",           "VARCHAR(8) NOT NULL DEFAULT 'like'"),
     ]
     with engine.connect() as conn:
+        existing: dict[str, set[str]] = {}
+        for table in {t for t, _, _ in new_columns}:
+            existing[table] = {
+                row[1] for row in conn.execute(text(f"PRAGMA table_info({table})"))
+            }
         for table, col, definition in new_columns:
-            try:
-                conn.execute(__import__("sqlalchemy").text(
-                    f"ALTER TABLE {table} ADD COLUMN {col} {definition}"
-                ))
-                conn.commit()
-            except Exception:
-                pass  # column already exists
+            if col in existing[table]:
+                continue
+            conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {col} {definition}"))
         # recommendation_cache backed the LLM slate cache removed in 2.3 —
         # recs are served from user_event_scores now.
-        try:
-            conn.execute(__import__("sqlalchemy").text(
-                "DROP TABLE IF EXISTS recommendation_cache"
-            ))
-            conn.commit()
-        except Exception:
-            pass
+        conn.execute(text("DROP TABLE IF EXISTS recommendation_cache"))
+        conn.commit()

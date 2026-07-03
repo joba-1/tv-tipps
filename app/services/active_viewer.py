@@ -8,6 +8,7 @@ default_user. Lost on restart by design — next browser command rearms it.
 from __future__ import annotations
 from datetime import datetime, timedelta
 import threading
+from app.timezones import utcnow
 
 _TTL = timedelta(hours=4)
 _lock = threading.Lock()
@@ -18,7 +19,7 @@ def record_active(receiver_name: str | None, user_slug: str | None) -> None:
     if not receiver_name or not user_slug:
         return
     with _lock:
-        _active[receiver_name] = (user_slug, datetime.utcnow())
+        _active[receiver_name] = (user_slug, utcnow())
 
 
 def get_active(receiver_name: str) -> str | None:
@@ -27,7 +28,7 @@ def get_active(receiver_name: str) -> str | None:
         if not entry:
             return None
         slug, ts = entry
-        if datetime.utcnow() - ts > _TTL:
+        if utcnow() - ts > _TTL:
             _active.pop(receiver_name, None)
             return None
         return slug
@@ -35,7 +36,7 @@ def get_active(receiver_name: str) -> str | None:
 
 def snapshot() -> dict[str, dict]:
     """Admin-status view: current registry with ages in seconds."""
-    now = datetime.utcnow()
+    now = utcnow()
     out: dict[str, dict] = {}
     with _lock:
         for name, (slug, ts) in list(_active.items()):

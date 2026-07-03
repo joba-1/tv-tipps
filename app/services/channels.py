@@ -1,12 +1,12 @@
 """Fetch and cache bouquet/channel data from receivers."""
 from __future__ import annotations
-from datetime import datetime
 from sqlalchemy.orm import Session
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from app.models import Receiver, Channel, ChannelAvailability, Bouquet, BouquetChannel
 from app.enigma.client import EnigmaClient
 from app.enigma.parser import parse_all_services, EnigmaParseError
 from app.services.forensics import dump_failure
+from app.timezones import utcnow
 from app.logging_setup import get_logger
 
 log = get_logger(__name__)
@@ -27,7 +27,7 @@ async def refresh_channels(receiver: Receiver, client: EnigmaClient, db: Session
                      error=str(e), raw=raw)
         log.warning("channels.parse_failed", receiver=receiver.name, error=str(e))
         return 0
-    now = datetime.utcnow()
+    now = utcnow()
     total_channels = 0
 
     for pb in bouquets:
