@@ -4,7 +4,7 @@ from datetime import datetime
 from sqlalchemy import func, update
 from sqlalchemy.orm import Session
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
-from app.models import Channel, EpgEvent, Receiver, Bouquet, UserEventScore
+from app.models import Channel, EpgEvent, Receiver, Bouquet, UserEventScore, ViewingSession
 from app.enigma.client import EnigmaClient
 from app.enigma.parser import parse_epg_events, ParsedEpgEvent, EnigmaParseError
 from app.services.forensics import dump_failure
@@ -98,7 +98,50 @@ def _upsert_events(
                 or (post_short or "") != (prev_short or "")):
                 changed_event_ids.append(prev_id)
 
+    _remove_overlapped(channel, events, db, now)
     return count, changed_event_ids
+
+
+def _remove_overlapped(
+    channel: Channel, events: list[ParsedEpgEvent], db: Session, now: datetime,
+) -> int:
+    """Unify overlapping events: delete not-yet-started rows on this channel
+    that overlap a freshly fetched event but have a different start_time.
+    These are leftovers of schedule shifts — the unique key is
+    (channel_id, start_time), so a moved event creates a second row instead of
+    updating the old one. Rows already started or referenced by a viewing
+    session are left alone. Score rows cascade with the delete."""
+    fetched_starts = {ev.start_time for ev in events}
+    win_start = min(ev.start_time for ev in events)
+    win_end = max(ev.end_time for ev in events)
+    candidates = (
+        db.query(EpgEvent.id, EpgEvent.start_time, EpgEvent.end_time)
+        .filter(
+            EpgEvent.channel_id == channel.id,
+            EpgEvent.start_time > now,
+            EpgEvent.start_time < win_end,
+            EpgEvent.end_time > win_start,
+            EpgEvent.start_time.notin_(fetched_starts),
+        )
+        .all()
+    )
+    if not candidates:
+        return 0
+    doomed = [
+        cid for cid, c_start, c_end in candidates
+        if any(c_start < ev.end_time and ev.start_time < c_end for ev in events)
+    ]
+    if doomed:
+        referenced = {
+            r[0] for r in db.query(ViewingSession.epg_event_id)
+            .filter(ViewingSession.epg_event_id.in_(doomed)).all()
+        }
+        doomed = [i for i in doomed if i not in referenced]
+    if not doomed:
+        return 0
+    db.query(EpgEvent).filter(EpgEvent.id.in_(doomed)).delete(synchronize_session=False)
+    log.info("epg.overlap_removed", channel=channel.name, count=len(doomed))
+    return len(doomed)
 
 
 def _enqueue_future_events(channel_id: int, start_times: list[datetime],
@@ -319,4 +362,31 @@ def cleanup_old_events(retention_days: int, db: Session) -> int:
     deleted = result.rowcount
     if deleted:
         log.info("epg.cleanup", deleted=deleted, retention_days=retention_days)
+    cleanup_overlapping_events(db)
+    return deleted
+
+
+def cleanup_overlapping_events(db: Session) -> int:
+    """Catch-all for overlap unification: among future events that overlap on
+    the same channel, keep the most recently cached row (id as tie-break) and
+    delete the rest. The ingest path already removes most overlaps; this
+    sweeps up whatever slipped through (e.g. shifts on channels a sweep never
+    re-fetched). Session-referenced rows are exempt."""
+    from sqlalchemy import text
+    now_str = utcnow().isoformat(sep=" ")
+    result = db.execute(text(
+        "DELETE FROM epg_events WHERE id IN ("
+        " SELECT a.id FROM epg_events a JOIN epg_events b"
+        "   ON b.channel_id = a.channel_id AND b.id != a.id"
+        "   AND b.start_time < a.end_time AND a.start_time < b.end_time"
+        " WHERE a.start_time > :now"
+        "   AND (a.cached_at < b.cached_at"
+        "        OR (a.cached_at = b.cached_at AND a.id < b.id))"
+        "   AND a.id NOT IN (SELECT epg_event_id FROM viewing_sessions"
+        "                    WHERE epg_event_id IS NOT NULL))",
+    ), {"now": now_str})
+    db.commit()
+    deleted = result.rowcount or 0
+    if deleted:
+        log.info("epg.overlap_cleanup", deleted=deleted)
     return deleted

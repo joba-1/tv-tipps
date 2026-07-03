@@ -400,3 +400,4 @@ journalctl -u tv-tipps -f | python3 -m json.tool
 | 0.5.0 | AI recommendation improvements: short_desc in prompt, likes signal, stated preferences bypass cold-start |
 | 1.0.0 | Like button, EPG search, admin preferences UI, receiver location in toasts |
 | 1.0.1 | Nav icons, watch toast shows room name, admin Save button disabled when unchanged; deploy.sh; full test suite |
+| 2.3.0 | Reliability + UX batch: nightly cron jobs actually fire (03:30 sweep, 04:15 rerate), non-blocking startup, scoring queue with now/next ingest scoring, overlapping same-channel events unified, "today" context ends 04:00, 90-day session retention, dead recs pipeline removed, standby_newstate editable in admin, calmer UI refresh without scroll jumps |
