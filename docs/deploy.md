@@ -354,7 +354,7 @@ All endpoints are on the same host/port.
 | POST | `/api/remote/zap` | `{"sref":"..."}` — switch channel (auto-wake) |
 | POST | `/api/likes/toggle` | Toggle like on an EPG event |
 | GET | `/api/likes` | Current user's liked events |
-| GET | `/api/admin/status` | Receiver status + DB counts |
+| GET | `/api/admin/status` | Receiver status + DB counts + app version |
 | POST | `/api/admin/refresh?target=all\|channels\|epg\|epg_full` | Trigger data refresh |
 | POST | `/api/admin/power?receiver=NAME&action=wake\|sleep` | Manual power control |
 | GET | `/api/admin/user-preferences?user=slug` | Get stated preferences |

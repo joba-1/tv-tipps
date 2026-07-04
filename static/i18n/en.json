@@ -55,6 +55,7 @@
   "label.epg_all": "All",
   "label.admin_channels": "Channels in DB: {n}",
   "label.admin_epg_events": "EPG events in DB: {n}",
+  "label.admin_version": "Version: {v}",
   "label.prefs_heading": "Preferences",
   "label.prefs_placeholder": "Favourite genres, shows, moods … what you like and what you don't.",
   "label.receiver_default_user": "Primary user (for new sessions)",

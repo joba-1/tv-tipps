@@ -561,6 +561,7 @@
     <div class="admin-stats" x-show="adminStatus">
       <p x-text="t('label.admin_channels', { n: adminStatus && adminStatus.db_channel_count })"></p>
       <p x-text="t('label.admin_epg_events', { n: adminStatus && adminStatus.db_epg_event_count })"></p>
+      <p x-text="t('label.admin_version', { v: adminStatus && adminStatus.version })"></p>
     </div>
   </main>
 

@@ -71,6 +71,7 @@ class AdminStatus(BaseModel):
     receivers: list[ReceiverStatus]
     db_channel_count: int
     db_epg_event_count: int
+    version: str = "?"
 
 
 class RecommendationItem(BaseModel):

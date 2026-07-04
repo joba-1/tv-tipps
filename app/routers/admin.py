@@ -1,3 +1,5 @@
+from pathlib import Path
+
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
@@ -7,6 +9,8 @@ from app.schemas import AdminStatus, ReceiverStatus
 from app.services.receivers import get_receiver_configs, _to_rcfg
 
 router = APIRouter()
+
+_VERSION = Path("VERSION").read_text().strip() if Path("VERSION").exists() else "?"
 
 
 def _infer_power_state(online: bool, rcfg, receiver) -> str:
@@ -354,6 +358,7 @@ async def admin_status(db: Session = Depends(get_db)):
         receivers=receiver_statuses,
         db_channel_count=db.query(Channel).count(),
         db_epg_event_count=db.query(EpgEvent).count(),
+        version=_VERSION,
     )
 
 
