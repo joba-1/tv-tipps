@@ -216,7 +216,7 @@
     <div x-show="epgEvents.length > 0 || !loadingEpg" class="event-list">
       <template x-for="ev in epgEvents" :key="ev.id">
         <article class="event-row epg-row" :class="isLive(ev) ? 'live' : ''"
-                 :data-start="ev.start_time" :data-end="ev.end_time"
+                 :data-start="ev.start_time" :data-end="ev.end_time" :data-id="ev.id"
                  @click="showDetail(ev, displayChannel(ev.channel_name))" role="button">
           <div class="event-meta">
             <div class="event-time"

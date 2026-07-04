@@ -512,7 +512,7 @@ function tvApp() {
       // visible event's start_time, so we can restore it after reload even if
       // earlier rows were inserted or removed. Initial loads skip this — they
       // scroll to "now" instead.
-      const anchorTime = this._epgNeedsInitialScroll ? null : this._recordEpgAnchor();
+      const anchor = this._epgNeedsInitialScroll ? null : this._recordEpgAnchor();
       try {
         let url = "/api/epg?";
         if (this.epgContext === "tonight") url += "context=tonight";
@@ -527,8 +527,8 @@ function tvApp() {
           const saved = this._loadSavedEpgAnchor();
           if (saved) this.$nextTick(() => this._restoreEpgAnchor(saved));
           else       this.$nextTick(() => this._epgScrollToNow());
-        } else if (anchorTime) {
-          this.$nextTick(() => this._restoreEpgAnchor(anchorTime));
+        } else if (anchor) {
+          this.$nextTick(() => this._restoreEpgAnchor(anchor));
         }
       } catch (e) {
         console.error("loadEpg failed:", e);
@@ -545,11 +545,11 @@ function tvApp() {
 
     _saveEpgAnchorNow() {
       if (this.page !== "epg") return;
-      const time = this._recordEpgAnchor();
-      if (!time) return;
+      const anchor = this._recordEpgAnchor();
+      if (!anchor) return;
       try {
         sessionStorage.setItem("tv-tipps:epg-anchor",
-          JSON.stringify({ time, savedAt: Date.now() }));
+          JSON.stringify({ anchor, savedAt: Date.now() }));
       } catch (_) {}
     },
 
@@ -557,39 +557,53 @@ function tvApp() {
       try {
         const raw = sessionStorage.getItem("tv-tipps:epg-anchor");
         if (!raw) return null;
-        const { time, savedAt } = JSON.parse(raw);
+        const { anchor, time, savedAt } = JSON.parse(raw);
         // Stale anchors (>6 h) point at programmes that have likely aired —
         // fall back to "now" rather than scrolling deep into the past.
-        if (!time || Date.now() - savedAt > 6 * 3600 * 1000) return null;
-        return time;
+        if (Date.now() - savedAt > 6 * 3600 * 1000) return null;
+        return anchor || time || null;  // `time` = pre-2.3.11 string format
       } catch (_) { return null; }
     },
 
     _recordEpgAnchor() {
-      // Topmost EPG row whose top edge is at or below the sticky nav.
+      // Topmost EPG row whose top edge is at or below the sticky nav. The
+      // event id pins the exact row (several channels often share the same
+      // start_time); start_time is the fallback if that event disappears.
+      // offset preserves how far the row sat below the nav.
       const navBottom = document.querySelector("nav")?.getBoundingClientRect().bottom || 0;
       const rows = document.querySelectorAll(".epg-row[data-start]");
       for (const row of rows) {
         const top = row.getBoundingClientRect().top;
-        if (top >= navBottom - 2) return row.dataset.start || null;
+        if (top >= navBottom - 2) {
+          return { id: row.dataset.id || null, start: row.dataset.start || null,
+                   offset: top - navBottom };
+        }
       }
       return null;
     },
 
-    _restoreEpgAnchor(savedStart) {
-      // Scroll to the first row whose start_time is >= the saved anchor. This
+    _restoreEpgAnchor(anchor) {
+      if (typeof anchor === "string") anchor = { start: anchor, offset: 0 };
+      if (!anchor || (!anchor.id && !anchor.start)) return;
+      // Scroll back to the exact anchored row (by event id) — or, if it's
+      // gone, to the first row whose start_time is >= the saved one. This
       // survives inserts/deletes anywhere in the list — the viewport stays
       // pinned to the same point in the schedule.
       const rows = document.querySelectorAll(".epg-row[data-start]");
       let target = null;
-      for (const row of rows) {
-        if ((row.dataset.start || "") >= savedStart) { target = row; break; }
+      if (anchor.id) {
+        target = document.querySelector(`.epg-row[data-id="${anchor.id}"]`);
+      }
+      if (!target && anchor.start) {
+        for (const row of rows) {
+          if ((row.dataset.start || "") >= anchor.start) { target = row; break; }
+        }
       }
       if (!target) return;
       const navBottom = document.querySelector("nav")?.getBoundingClientRect().bottom || 0;
       const rect = target.getBoundingClientRect();
-      // Align the target row's top with the bottom of the sticky nav.
-      window.scrollBy({ top: rect.top - navBottom, behavior: "instant" });
+      // Put the target row's top back where it was relative to the sticky nav.
+      window.scrollBy({ top: rect.top - navBottom - (anchor.offset || 0), behavior: "instant" });
     },
 
     _epgScrollToNow() {
