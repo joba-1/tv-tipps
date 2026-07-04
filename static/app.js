@@ -210,7 +210,7 @@ function tvApp() {
       setInterval(() => { if (!document.hidden) this.loadReceivers(); }, 30_000);
       setInterval(() => {
         if (!document.hidden) this._refreshCurrentPage({ receivers: false });
-      }, 300_000);
+      }, 120_000);
       // Progress bars advance between refreshes via this reactive clock.
       setInterval(() => { this.nowTick = Date.now(); }, 60_000);
     },
@@ -566,17 +566,18 @@ function tvApp() {
     },
 
     _recordEpgAnchor() {
-      // Topmost EPG row whose top edge is at or below the sticky nav. The
-      // event id pins the exact row (several channels often share the same
-      // start_time); start_time is the fallback if that event disappears.
-      // offset preserves how far the row sat below the nav.
+      // The EPG row occupying the anchor line just below the sticky nav —
+      // including one scrolled partway under it (negative offset), so restores
+      // are pixel-perfect. The event id pins the exact row (several channels
+      // often share the same start_time); start_time is the fallback if that
+      // event disappears.
       const navBottom = document.querySelector("nav")?.getBoundingClientRect().bottom || 0;
       const rows = document.querySelectorAll(".epg-row[data-start]");
       for (const row of rows) {
-        const top = row.getBoundingClientRect().top;
-        if (top >= navBottom - 2) {
+        const rect = row.getBoundingClientRect();
+        if (rect.bottom > navBottom + 2) {
           return { id: row.dataset.id || null, start: row.dataset.start || null,
-                   offset: top - navBottom };
+                   offset: rect.top - navBottom };
         }
       }
       return null;
@@ -591,6 +592,7 @@ function tvApp() {
       // pinned to the same point in the schedule.
       const rows = document.querySelectorAll(".epg-row[data-start]");
       let target = null;
+      let offset = anchor.offset || 0;
       if (anchor.id) {
         target = document.querySelector(`.epg-row[data-id="${anchor.id}"]`);
       }
@@ -598,12 +600,15 @@ function tvApp() {
         for (const row of rows) {
           if ((row.dataset.start || "") >= anchor.start) { target = row; break; }
         }
+        // A different row than the one anchored — its saved (possibly
+        // negative) pixel offset doesn't apply; align it to the nav instead.
+        offset = 0;
       }
       if (!target) return;
       const navBottom = document.querySelector("nav")?.getBoundingClientRect().bottom || 0;
       const rect = target.getBoundingClientRect();
       // Put the target row's top back where it was relative to the sticky nav.
-      window.scrollBy({ top: rect.top - navBottom - (anchor.offset || 0), behavior: "instant" });
+      window.scrollBy({ top: rect.top - navBottom - offset, behavior: "instant" });
     },
 
     _epgScrollToNow() {

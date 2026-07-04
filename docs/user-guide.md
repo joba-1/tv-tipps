@@ -55,7 +55,7 @@ This is the main page. It shows a ranked list of programmes that match your tast
 | **Today** | Everything airing from now until 04:00 (late-night shows count as today) |
 
 Switch context with the buttons at the top. The list refreshes automatically every
-5 minutes, plus right after the current programme ends — without losing your scroll
+2 minutes, plus right after the current programme ends — without losing your scroll
 position. Nothing refreshes while the app is in the background; returning to it
 triggers one catch-up refresh.
 
