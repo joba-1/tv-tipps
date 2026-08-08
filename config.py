@@ -51,7 +51,13 @@ class Settings(BaseSettings):
     # that never settles; MIN guards against calling it before EIT starts.
     epg_wake_dwell_min_sec: int = 15
     epg_wake_dwell_max_sec: int = 120
-    epg_wake_dwell_flat_sec: int = 20
+    # Measured 2026-08-08: across 19 transponders, growth never once paused for a
+    # sample and resumed — the largest gap between two growth samples was 7 s, so
+    # two flat samples is slack over anything the box has actually done. Same-day
+    # EPG does not depend on this window: DVB repeats the first day's schedule at
+    # ≤10 s (ETSI TS 101 211), so MIN alone covers a full first-day cycle, and it
+    # is only the far future (≤30 s cadence) that a short window could clip.
+    epg_wake_dwell_flat_sec: int = 10
     epg_wake_sample_sec: int = 5
     # Hard cap on the whole tour: with every transponder hitting its ceiling the
     # box would stay powered for transponders × MAX. Whatever is not visited by
