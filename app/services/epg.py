@@ -267,12 +267,29 @@ def transponder_key(sref: str) -> tuple[str, str, str] | None:
     return parts[4].upper(), parts[5].upper(), parts[6].upper()
 
 
+def is_dvb_service(sref: str) -> bool:
+    """Is this a service the tuner can actually tune to?
+
+    Bouquets also carry pseudo-services that no zap will ever produce EPG for —
+    an AV input appears as `8192:0:1:0:0:0:0:0:0:0::PS3`, streams use type 4097.
+    A real DVB reference has type 1 and a non-zero transponder triple. Zapping
+    the others just burns a dwell per night on a PlayStation input."""
+    parts = sref.split(":")
+    if len(parts) < 7 or parts[0] != "1":
+        return False
+    return transponder_key(sref) != ("0", "0", "0")
+
+
 def transponder_groups(channels: list[Channel]) -> list[list[Channel]]:
     """Channels grouped by the transponder they sit on, each group ordered and
     the groups themselves ordered by first channel name — deterministic, so
-    consecutive nights take the same route and the logs stay comparable."""
+    consecutive nights take the same route and the logs stay comparable.
+    Non-tunable entries are dropped; a channel that merely has no EPG yet is
+    kept, since that can change."""
     by_tp: dict[tuple[str, str, str], list[Channel]] = {}
     for ch in sorted(channels, key=lambda c: (c.name or "", c.sref)):
+        if not is_dvb_service(ch.sref):
+            continue
         key = transponder_key(ch.sref)
         if key:
             by_tp.setdefault(key, []).append(ch)

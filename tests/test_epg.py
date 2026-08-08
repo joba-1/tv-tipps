@@ -372,6 +372,7 @@ class TestRefreshNowNext:
 
 from app.services.epg import (  # noqa: E402
     transponder_key, transponder_tour, transponder_groups, prime_epg_cache,
+    is_dvb_service,
     _dwell_until_saturated,
 )
 
@@ -393,6 +394,26 @@ class TestTransponderKey:
     def test_malformed_sref(self):
         assert transponder_key("1:0:19") is None
         assert transponder_key("") is None
+
+
+class TestIsDvbService:
+    """Bouquets carry entries no tuner can reach; zapping them wastes a dwell."""
+
+    def test_real_dvb_service(self):
+        assert is_dvb_service("1:0:19:2B98:3F2:1:C00000:0:0:0:") is True
+
+    def test_av_input_pseudo_service(self):
+        # The octagon's bouquet lists a PlayStation on an HDMI input like this.
+        assert is_dvb_service("8192:0:1:0:0:0:0:0:0:0::PS3") is False
+
+    def test_stream_reference(self):
+        assert is_dvb_service("4097:0:1:0:0:0:0:0:0:0:http%3a//x") is False
+
+    def test_dvb_type_with_zero_transponder(self):
+        assert is_dvb_service("1:0:1:0:0:0:0:0:0:0:") is False
+
+    def test_malformed(self):
+        assert is_dvb_service("nonsense") is False
 
 
 class TestTransponderTour:
@@ -423,6 +444,21 @@ class TestTransponderTour:
         bad = make_channel(db, sref="nonsense", name="Bad")
         db.commit()
         assert [c.name for c in transponder_tour([good, bad])] == ["Good"]
+
+    def test_av_input_is_not_toured(self, db: Session):
+        from tests.conftest import make_channel
+        good = make_channel(db, sref="1:0:19:1:AAA:1:C00000:0:0:0:", name="Good")
+        ps3 = make_channel(db, sref="8192:0:1:0:0:0:0:0:0:0::PS3", name="PS3")
+        db.commit()
+        assert [c.name for c in transponder_tour([good, ps3])] == ["Good"]
+
+    def test_channel_without_epg_is_still_toured(self, db: Session):
+        """A real service that happens to carry no EPG today may carry it
+        tomorrow — only untunable references are dropped."""
+        from tests.conftest import make_channel
+        empty = make_channel(db, sref="1:0:19:9:41D:1:C00000:0:0:0:", name="AnixeHD Serie")
+        db.commit()
+        assert [c.name for c in transponder_tour([empty])] == ["AnixeHD Serie"]
 
 
 class FakeTourClient:
