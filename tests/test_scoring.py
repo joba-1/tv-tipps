@@ -297,3 +297,20 @@ class TestGetRecommendationsFromScores:
         with patch("app.services.scoring.get_channels_for_user", return_value=[ch]):
             result = await get_recommendations_from_scores(user.id, user.name, "now", db)
         assert result["recommendations"] == []
+
+    @pytest.mark.asyncio
+    async def test_now_bridges_slot_boundary(self, db: Session):
+        """Everything airing is nearly over (the pre-:15 situation) → the list
+        must still fill from the events starting in the next few minutes."""
+        user = make_user(db)
+        ch = make_channel(db)
+        ending = make_event(db, ch, title="Ending", offset_min=-55, duration_sec=3600)
+        starting = make_event(db, ch, title="Starting", offset_min=5, duration_sec=3600)
+        too_far = make_event(db, ch, title="TooFar", offset_min=40, duration_sec=3600)
+        db.commit()
+        _upsert_scores(user.id, [(ending.id, 0.9, None, "llm"),
+                                 (starting.id, 0.6, None, "llm"),
+                                 (too_far.id, 0.95, None, "llm")], db)
+        with patch("app.services.scoring.get_channels_for_user", return_value=[ch]):
+            result = await get_recommendations_from_scores(user.id, user.name, "now", db)
+        assert [r["title"] for r in result["recommendations"]] == ["Starting"]

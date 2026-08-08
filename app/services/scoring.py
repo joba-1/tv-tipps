@@ -54,6 +54,15 @@ _DEBOUNCE_SEC = 60
 _AI_PROBE_FLOOR_SEC = 90        # 1.5 min between probes when freshly down
 _AI_PROBE_CEILING_SEC = 30 * 60  # cap backoff at 30 min
 
+# "now" context: an event that is nearly over is useless as a tip, so we drop
+# anything with less than _NOW_MIN_REMAINING left. German TV starts almost
+# everything on the :15 slot boundary, so in the minutes before one *every*
+# running event fails that test and the page went empty (observed 20:08 local,
+# 0 of 25 airing events survived). Pulling in what starts within
+# _NOW_LOOKAHEAD bridges the boundary, so "now" always has something to show.
+_NOW_MIN_REMAINING = timedelta(minutes=10)
+_NOW_LOOKAHEAD = timedelta(minutes=15)
+
 
 # ─── In-process state ────────────────────────────────────────────────────────
 
@@ -842,12 +851,13 @@ async def get_recommendations_from_scores(
     now = utcnow()
 
     # Each context defines a precise SQL window:
-    #   now    → already airing (start_time ≤ now < end_time)
+    #   now    → airing, or starting within the next _NOW_LOOKAHEAD
     #   next   → starts strictly after now, within 2 hours
     #   prime  → starts inside tonight's prime window
     #   today  → starts inside the remainder of today
     if context == "now":
-        win_filter = and_(EpgEvent.start_time <= now, EpgEvent.end_time > now)
+        win_filter = and_(EpgEvent.start_time <= now + _NOW_LOOKAHEAD,
+                          EpgEvent.end_time > now)
     elif context == "next":
         win_filter = and_(EpgEvent.start_time > now,
                           EpgEvent.start_time <= now + timedelta(hours=2))
@@ -952,8 +962,9 @@ async def get_recommendations_from_scores(
     for entry in sorted(best_by_airing.values(),
                         key=lambda e: (-e["score"], e["ev"].start_time)):
         ev = entry["ev"]; ch = entry["ch"]
-        # For "now": skip events with less than 10 min remaining.
-        if context == "now" and (ev.end_time - now).total_seconds() < 600:
+        # For "now": skip events that are nearly over. Events from the
+        # lookahead window have not started yet and always pass.
+        if context == "now" and ev.end_time - now < _NOW_MIN_REMAINING:
             continue
         items.append({
             "id": ev.id,
