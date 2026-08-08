@@ -29,5 +29,6 @@ def _to_rcfg(r: Receiver) -> ReceiverConfig:
         intertechno_device=r.intertechno_device if r.intertechno_device is not None else 1,
         intertechno_url=r.intertechno_url or "",
         standby_newstate=r.standby_newstate if r.standby_newstate is not None else 4,
+        epg_wake=bool(r.epg_wake),
         location=r.location or "",
     )

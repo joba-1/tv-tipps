@@ -23,6 +23,10 @@ class Receiver(Base):
     # OpenWebif /api/powerstate?newstate=N value that puts THIS box into light
     # standby. Differs by firmware: VTi (Vu+) uses 4, openATV (Octagon) uses 5.
     standby_newstate: Mapped[int] = mapped_column(Integer, nullable=False, default=4, server_default="4")
+    # Wake this box for the nightly full EPG sweep and put it back afterwards.
+    # Only useful for boxes that are normally powered down — otherwise the
+    # sweep already finds them online.
+    epg_wake: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="0")
     has_genre: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="0")
     default_user: Mapped[str | None] = mapped_column(String(64))
     power_state: Mapped[str | None] = mapped_column(String(32))  # on|standby|deep_standby|unknown

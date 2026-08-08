@@ -20,12 +20,15 @@ SREF_A = "1:0:1:AAAA:1:1:0:0:0:0:"
 SREF_B = "1:0:1:BBBB:1:1:0:0:0:0:"
 
 # Per-test knobs the fake client reads on every call.
-FAKE = {"power": "on", "sref": SREF_A}
+FAKE = {"power": "on", "sref": SREF_A, "online": True}
 
 
 class FakeEnigmaClient:
     def __init__(self, ip, mock=False):
         pass
+
+    async def is_online(self):
+        return FAKE["online"]
 
     async def get_power_state(self):
         return FAKE["power"]
@@ -53,7 +56,7 @@ def env(monkeypatch):
     monkeypatch.setattr(poller, "EnigmaClient", FakeEnigmaClient)
     poller._state.clear()
     active_viewer._active.clear()
-    FAKE.update({"power": "on", "sref": SREF_A})
+    FAKE.update({"power": "on", "sref": SREF_A, "online": True})
 
     db = TestSession()
     now = utcnow()
@@ -191,3 +194,87 @@ class TestOrphanSweep:
         assert rows[0].confirmed is True
         assert rows[0].ended_at == rcv.last_seen  # best effort: receiver's last_seen
         assert rows[0].duration_sec > 0
+
+
+# ── Nightly EPG wake ──────────────────────────────────────────────────────────
+
+class TestNightlyEpgWake:
+    """A box that is normally powered off contributes no EPG at all, because the
+    sweep only talks to receivers that answer HTTP. _nightly_full_sweep wakes the
+    ones flagged epg_wake and powers them back down afterwards."""
+
+    @pytest.fixture
+    def wake_env(self, env, monkeypatch):
+        calls = SimpleNamespace(woken=[], slept=[], swept=0)
+
+        async def fake_wake(rcfg):
+            calls.woken.append(rcfg.name)
+            return True, None
+
+        async def fake_sleep(rcfg):
+            calls.slept.append(rcfg.name)
+            return True, None
+
+        async def fake_sweep(full=False):
+            calls.swept += 1
+
+        monkeypatch.setattr(poller, "wake_for_epg", fake_wake)
+        monkeypatch.setattr(poller, "sleep_receiver", fake_sleep)
+        monkeypatch.setattr(poller, "_refresh_all_epg", fake_sweep)
+        return SimpleNamespace(env=env, calls=calls)
+
+    def _flag(self, env, *, epg_wake: bool) -> None:
+        rcv = env.db.query(models.Receiver).one()
+        rcv.epg_wake = epg_wake
+        rcv.power_method = "intertechno"
+        env.db.commit()
+
+    @pytest.mark.asyncio
+    async def test_offline_flagged_receiver_is_woken_and_powered_back_down(self, wake_env):
+        self._flag(wake_env.env, epg_wake=True)
+        FAKE["online"] = False
+        await poller._nightly_full_sweep()
+        assert wake_env.calls.woken == ["box1"]
+        assert wake_env.calls.slept == ["box1"]
+        assert wake_env.calls.swept == 1
+
+    @pytest.mark.asyncio
+    async def test_unflagged_receiver_is_left_alone(self, wake_env):
+        self._flag(wake_env.env, epg_wake=False)
+        FAKE["online"] = False
+        await poller._nightly_full_sweep()
+        assert wake_env.calls.woken == []
+        assert wake_env.calls.slept == []
+        assert wake_env.calls.swept == 1
+
+    @pytest.mark.asyncio
+    async def test_already_online_receiver_is_not_powered_off_afterwards(self, wake_env):
+        """We only switch off what we switched on — a box the user is watching
+        must survive the sweep."""
+        self._flag(wake_env.env, epg_wake=True)
+        FAKE["online"] = True
+        await poller._nightly_full_sweep()
+        assert wake_env.calls.woken == []
+        assert wake_env.calls.slept == []
+
+    @pytest.mark.asyncio
+    async def test_failed_wake_is_not_slept(self, wake_env, monkeypatch):
+        async def failing_wake(rcfg):
+            return False, "gateway unreachable"
+        monkeypatch.setattr(poller, "wake_for_epg", failing_wake)
+        self._flag(wake_env.env, epg_wake=True)
+        FAKE["online"] = False
+        await poller._nightly_full_sweep()
+        assert wake_env.calls.slept == []
+        assert wake_env.calls.swept == 1
+
+    @pytest.mark.asyncio
+    async def test_receiver_powered_down_even_if_sweep_raises(self, wake_env, monkeypatch):
+        async def boom(full=False):
+            raise RuntimeError("sweep exploded")
+        monkeypatch.setattr(poller, "_refresh_all_epg", boom)
+        self._flag(wake_env.env, epg_wake=True)
+        FAKE["online"] = False
+        with pytest.raises(RuntimeError):
+            await poller._nightly_full_sweep()
+        assert wake_env.calls.slept == ["box1"]

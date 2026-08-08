@@ -37,6 +37,8 @@ class ReceiverCreateRequest(BaseModel):
     intertechno_url: str = ""
     # OpenWebif newstate for light standby — firmware-specific (VTi=4, openATV=5)
     standby_newstate: int = 4
+    # Wake for the nightly full EPG sweep, then power back down
+    epg_wake: bool = False
     has_genre: bool = False
     default_user: str | None = None
 
@@ -81,6 +83,7 @@ async def list_receivers(db: Session = Depends(get_db)):
             "intertechno_device": rcfg.intertechno_device,
             "intertechno_url": rcfg.intertechno_url,
             "standby_newstate": rcfg.standby_newstate,
+            "epg_wake": rcfg.epg_wake,
             "default_user": rcfg.default_user or None,
             "probing": probing,
         })
@@ -134,6 +137,7 @@ async def probe_receivers(db: Session = Depends(get_db)):
             "intertechno_device": rcfg.intertechno_device,
             "intertechno_url": rcfg.intertechno_url,
             "standby_newstate": rcfg.standby_newstate,
+            "epg_wake": rcfg.epg_wake,
             "default_user": rcfg.default_user or None,
             "probing": False,
         })
@@ -151,6 +155,7 @@ def create_receiver(req: ReceiverCreateRequest, db: Session = Depends(get_db)):
         intertechno_family=req.intertechno_family, intertechno_device=req.intertechno_device,
         intertechno_url=req.intertechno_url,
         standby_newstate=req.standby_newstate,
+        epg_wake=req.epg_wake,
         has_genre=req.has_genre, default_user=req.default_user,
         power_state="unknown",
     )
@@ -173,6 +178,7 @@ class ReceiverPatchRequest(BaseModel):
     intertechno_device: int | None = None
     intertechno_url: str | None = None
     standby_newstate: int | None = None
+    epg_wake: bool | None = None
     has_genre: bool | None = None
     default_user: str | None = None
 
@@ -218,6 +224,8 @@ def update_receiver(name: str, req: ReceiverPatchRequest, db: Session = Depends(
         if not 0 <= req.standby_newstate <= 5:
             raise HTTPException(400, "standby_newstate must be 0..5 (VTi=4, openATV=5)")
         r.standby_newstate = req.standby_newstate
+    if req.epg_wake is not None:
+        r.epg_wake = bool(req.epg_wake)
     if req.has_genre is not None:
         r.has_genre = bool(req.has_genre)
     if req.default_user is not None:
@@ -234,6 +242,7 @@ def update_receiver(name: str, req: ReceiverPatchRequest, db: Session = Depends(
         "intertechno_device": r.intertechno_device,
         "intertechno_url": r.intertechno_url,
         "standby_newstate": r.standby_newstate,
+        "epg_wake": r.epg_wake,
         "has_genre": r.has_genre,
         "default_user": r.default_user or None,
     }
@@ -350,7 +359,7 @@ async def admin_status(db: Session = Depends(get_db)):
             default_user=rcfg.default_user or None,
             wol_mac=rcfg.wol_mac, intertechno_family=rcfg.intertechno_family,
             intertechno_device=rcfg.intertechno_device, intertechno_url=rcfg.intertechno_url,
-            standby_newstate=rcfg.standby_newstate,
+            standby_newstate=rcfg.standby_newstate, epg_wake=rcfg.epg_wake,
         ))
     db.commit()
 

@@ -10,9 +10,10 @@ from app.models import Receiver
 from app.enigma.client import EnigmaClient
 from app.services.channels import refresh_channels
 from app.services.epg import refresh_now_next, cleanup_old_events
+from app.services.power import wake_for_epg, sleep_receiver
 from app.logging_setup import get_logger
 from app.timezones import utcnow
-from config import settings
+from config import ReceiverConfig, settings
 
 log = get_logger(__name__)
 
@@ -320,6 +321,52 @@ def _check_empty_epg(receiver: Receiver, channel_ids: set[int], db: Session) -> 
     # warm is redundant. Per-event scoring happens at EPG ingest, not here.
 
 
+async def _nightly_full_sweep() -> None:
+    """The nightly full EPG sweep, preceded by waking every receiver flagged
+    `epg_wake` and followed by powering those back down.
+
+    Without this, a box that is normally switched off (Intertechno mains cut,
+    deep standby) never contributes EPG at all — `_refresh_all_epg` only talks
+    to receivers that answer HTTP, so the sweep just logged
+    `epg.receiver_offline_skip` night after night and the cached EPG aged out.
+    """
+    woken = await _wake_epg_receivers()
+    try:
+        await _refresh_all_epg(full=True)
+    finally:
+        # Always hand the boxes back the way we found them, even if the sweep
+        # raised — leaving a receiver powered up is the one outcome the user
+        # would notice.
+        for rcfg in woken:
+            ok, reason = await sleep_receiver(rcfg)
+            log.info("epg.wake_sleep_back", receiver=rcfg.name, ok=ok, reason=reason)
+
+
+async def _wake_epg_receivers() -> list[ReceiverConfig]:
+    """Power up the `epg_wake` receivers that are currently offline. Returns the
+    ones we actually switched on, so only those get switched off again."""
+    db = SessionLocal()
+    try:
+        from app.services.receivers import get_receiver_configs
+        candidates = [r for r in get_receiver_configs(db) if r.epg_wake]
+    finally:
+        db.close()
+
+    woken: list[ReceiverConfig] = []
+    for rcfg in candidates:
+        client = EnigmaClient(rcfg.ip, mock=settings.mock_receivers)
+        if await client.is_online():
+            log.info("epg.wake_skip_online", receiver=rcfg.name)
+            continue
+        ok, reason = await wake_for_epg(rcfg)
+        if ok:
+            log.info("epg.wake_ok", receiver=rcfg.name, note=reason)
+            woken.append(rcfg)
+        else:
+            log.warning("epg.wake_failed", receiver=rcfg.name, reason=reason)
+    return woken
+
+
 async def _refresh_all_channels() -> None:
     db = SessionLocal()
     try:
@@ -368,9 +415,12 @@ async def run_refresh(target: str) -> None:
     """Called from admin endpoint for on-demand refresh."""
     if target in ("channels", "all"):
         await _refresh_all_channels()
-    if target in ("epg", "epg_full", "all"):
-        full = target == "epg_full"
-        await _refresh_all_epg(full=full)
+    if target == "epg_full":
+        # Same treatment as the nightly job: an explicit full refresh should
+        # reach the boxes that are powered down, too.
+        await _nightly_full_sweep()
+    elif target in ("epg", "all"):
+        await _refresh_all_epg(full=False)
 
 
 def _add_poll_job(name: str, delay_sec: int = 0) -> None:
@@ -457,11 +507,10 @@ def start_scheduler() -> None:
     # wrapper (lambda or def) runs in APScheduler's worker thread, where the
     # returned coroutine is discarded un-awaited and create_task has no loop.
     scheduler.add_job(
-        _refresh_all_epg,
+        _nightly_full_sweep,
         "cron",
         hour=settings.epg_full_refresh_hour,
         minute=30,
-        kwargs={"full": True},
         id="refresh_epg_full",
         max_instances=1,
         coalesce=True,

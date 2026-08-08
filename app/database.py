@@ -59,6 +59,7 @@ def _migrate():
         ("receivers",   "intertechno_device",  "INTEGER NOT NULL DEFAULT 1"),
         ("receivers",   "intertechno_url",     "VARCHAR(128) NOT NULL DEFAULT ''"),
         ("receivers",   "standby_newstate",    "INTEGER NOT NULL DEFAULT 4"),
+        ("receivers",   "epg_wake",            "BOOLEAN NOT NULL DEFAULT 0"),
         ("user_likes",  "sentiment",           "VARCHAR(8) NOT NULL DEFAULT 'like'"),
     ]
     with engine.connect() as conn:

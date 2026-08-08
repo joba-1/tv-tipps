@@ -65,6 +65,8 @@ class ReceiverStatus(BaseModel):
     intertechno_url: str = ""
     # OpenWebif newstate for light standby — firmware-specific (VTi=4, openATV=5)
     standby_newstate: int = 4
+    # Wake for the nightly full EPG sweep, then power back down
+    epg_wake: bool = False
 
 
 class AdminStatus(BaseModel):

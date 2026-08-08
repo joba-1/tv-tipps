@@ -117,6 +117,54 @@ async def wake_receiver(rcfg: ReceiverConfig) -> PowerResult:
     return False, "power_method is 'none' for this receiver"
 
 
+# Nightly EPG wake: how long we wait for OpenWebif to answer after power-on,
+# and how often we retry. The poll is deliberately tight — every second the box
+# runs with a live HDMI output is a second it can switch the TV on, so we want
+# to fire the standby command on the very first request that succeeds.
+_WAKE_BOOT_TIMEOUT_SEC = 240
+_WAKE_POLL_INTERVAL_SEC = 1.0
+
+
+async def wake_for_epg(rcfg: ReceiverConfig) -> PowerResult:
+    """Power a box up for an EPG sweep, then drop it into light standby as soon
+    as OpenWebif responds.
+
+    Light standby keeps the network stack and the EPG API alive but blanks the
+    video output, so the box is usable as an EPG source without driving the TV.
+    We cannot suppress the HDMI signal for the boot itself — that happens in the
+    box's firmware before anything of ours is reachable — so the standby command
+    goes out on the first successful OpenWebif call. Set the box's own startup
+    behaviour to "standby" (and disable HDMI-CEC one-touch-play) if the TV must
+    never wake at all.
+    """
+    import asyncio
+    from app.enigma.client import EnigmaClient
+
+    ok, reason = await wake_receiver(rcfg)
+    if not ok:
+        return False, reason
+
+    client = EnigmaClient(rcfg.ip, mock=settings.mock_receivers)
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + _WAKE_BOOT_TIMEOUT_SEC
+    while loop.time() < deadline:
+        if await client.is_online():
+            standby_ok, standby_reason = await openwebif_standby(rcfg)
+            log.info("power.epg_wake_up", receiver=rcfg.name,
+                     boot_sec=round(_WAKE_BOOT_TIMEOUT_SEC - (deadline - loop.time())),
+                     standby=standby_ok)
+            if not standby_ok:
+                # The box is up and answering, which is all the sweep needs —
+                # report success but keep the reason so the caller can log it.
+                return True, f"online but standby failed: {standby_reason}"
+            return True, None
+        await asyncio.sleep(_WAKE_POLL_INTERVAL_SEC)
+
+    log.warning("power.epg_wake_timeout", receiver=rcfg.name,
+                timeout_sec=_WAKE_BOOT_TIMEOUT_SEC)
+    return False, f"receiver did not come up within {_WAKE_BOOT_TIMEOUT_SEC}s"
+
+
 async def sleep_receiver(rcfg: ReceiverConfig) -> PowerResult:
     """Put receiver to sleep/standby using its configured power_method.
     Returns (ok, reason)."""

@@ -100,6 +100,7 @@
   "label.receiver_intertechno_device": "Intertechno Gerät (1–3)",
   "label.receiver_intertechno_url": "Intertechno-Gateway URL",
   "label.receiver_standby_newstate": "Standby-Modus (OpenWebif newstate)",
+  "label.receiver_epg_wake": "EPG-Weckruf (nachts kurz einschalten)",
   "label.receiver_has_genre": "Genre-Daten verfügbar",
   "label.edit_receiver": "Bearbeiten",
   "btn.save": "Speichern",

@@ -343,6 +343,9 @@
                     <option value="5">5 (openATV)</option>
                   </select>
                 </label>
+                <label><span x-text="t('label.receiver_epg_wake')"></span>
+                  <input type="checkbox" role="switch" x-model="editReceiver.epg_wake">
+                </label>
                 <label><span x-text="t('label.receiver_has_genre')"></span>
                   <input type="checkbox" role="switch" x-model="editReceiver.has_genre">
                 </label>
@@ -390,6 +393,9 @@
               <option value="4">4 (VTi)</option>
               <option value="5">5 (openATV)</option>
             </select>
+          </label>
+          <label><span x-text="t('label.receiver_epg_wake')"></span>
+            <input type="checkbox" role="switch" x-model="newReceiver.epg_wake">
           </label>
           <label><span x-text="t('label.receiver_has_genre')"></span>
             <input type="checkbox" role="switch" x-model="newReceiver.has_genre">
