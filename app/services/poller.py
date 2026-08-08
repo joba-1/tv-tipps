@@ -394,8 +394,14 @@ async def _prime_woken_receiver(rcfg: ReceiverConfig) -> None:
             log.info("epg.prime_skip", receiver=rcfg.name, reason="no visible channels")
             return
         client = EnigmaClient(rcfg.ip, mock=settings.mock_receivers)
-        await prime_epg_cache(receiver, client, list(visible.values()),
-                              dwell_sec=settings.epg_wake_dwell_sec)
+        await prime_epg_cache(
+            receiver, client, list(visible.values()),
+            min_sec=settings.epg_wake_dwell_min_sec,
+            max_sec=settings.epg_wake_dwell_max_sec,
+            flat_sec=settings.epg_wake_dwell_flat_sec,
+            sample_sec=settings.epg_wake_sample_sec,
+            tour_max_sec=settings.epg_wake_tour_max_sec,
+        )
     except Exception as e:
         # A failed tour costs us data, not correctness — the sweep still runs on
         # whatever the box already had.

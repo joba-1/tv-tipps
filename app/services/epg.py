@@ -267,24 +267,110 @@ def transponder_key(sref: str) -> tuple[str, str, str] | None:
     return parts[4].upper(), parts[5].upper(), parts[6].upper()
 
 
-def transponder_tour(channels: list[Channel]) -> list[Channel]:
-    """One channel per distinct transponder, so a zap tour visits each satellite
-    frequency exactly once. Deterministic (sorted by name) so consecutive nights
-    take the same route and the logs stay comparable."""
-    by_tp: dict[tuple[str, str, str], Channel] = {}
+def transponder_groups(channels: list[Channel]) -> list[list[Channel]]:
+    """Channels grouped by the transponder they sit on, each group ordered and
+    the groups themselves ordered by first channel name — deterministic, so
+    consecutive nights take the same route and the logs stay comparable."""
+    by_tp: dict[tuple[str, str, str], list[Channel]] = {}
     for ch in sorted(channels, key=lambda c: (c.name or "", c.sref)):
         key = transponder_key(ch.sref)
-        if key and key not in by_tp:
-            by_tp[key] = ch
+        if key:
+            by_tp.setdefault(key, []).append(ch)
     return list(by_tp.values())
 
 
+def transponder_tour(channels: list[Channel]) -> list[Channel]:
+    """One channel per distinct transponder — the representative we zap to."""
+    return [group[0] for group in transponder_groups(channels)]
+
+
+async def _count_cached_events(client: EnigmaClient, group: list[Channel]) -> int:
+    """How many EPG events the box currently holds for this transponder's
+    channels. Read with the same call the sweep uses, so the number we watch
+    saturate is the number the sweep will actually harvest."""
+    total = 0
+    for ch in group:
+        raw = await client.get_epg_service(ch.sref, hours=24)
+        if not raw:
+            continue
+        try:
+            total += len(parse_epg_events(raw))
+        except EnigmaParseError:
+            # A malformed payload must not read as growth.
+            continue
+    return total
+
+
+async def _dwell_until_saturated(
+    client: EnigmaClient, group: list[Channel], *,
+    min_sec: float, max_sec: float, flat_sec: float, sample_sec: float,
+) -> dict:
+    """Sit on the current transponder until its EPG stops growing.
+
+    EIT arrives on a carousel, so the event count climbs and then goes flat. A
+    single flat sample is not saturation — sections arrive in bursts and a lull
+    mid-cycle looks identical to "done" — so we require `flat_sec` without a new
+    event before moving on. `min_sec` guards against declaring victory before the
+    first sections land; `max_sec` caps a transponder that never settles.
+    """
+    import asyncio
+    import math
+
+    def _samples(seconds: float) -> int:
+        """How many samples span `seconds`. The loop counts samples rather than
+        seconds so "flat for flat_sec" always means at least one observed flat
+        sample, however the bounds are configured."""
+        if sample_sec <= 0:
+            return 1 if seconds > 0 else 0
+        return max(0, math.ceil(seconds / sample_sec))
+
+    flat_needed = max(1, _samples(flat_sec))
+    min_samples = _samples(min_sec)
+    max_samples = max(1, _samples(max_sec))
+
+    loop = asyncio.get_running_loop()
+    start = loop.time()
+    best = -1
+    last_growth = 0.0
+    taken = 0
+    flat = 0
+    curve: list[tuple[int, int]] = []
+    reason = "ceiling"
+    while True:
+        await asyncio.sleep(sample_sec)
+        taken += 1
+        elapsed = loop.time() - start
+        count = await _count_cached_events(client, group)
+        curve.append((round(elapsed), count))
+        if count > best:
+            best = count
+            last_growth = elapsed
+            flat = 0
+        else:
+            flat += 1
+        if taken >= min_samples and flat >= flat_needed:
+            reason = "saturated"
+            break
+        if taken >= max_samples:
+            break
+    return {
+        "events": max(best, 0),
+        "dwell_sec": round(curve[-1][0]) if curve else 0,
+        "saturated_after_sec": round(last_growth) if best > 0 else None,
+        "reason": reason,
+        # Kept small enough to log: it is the evidence for tuning the bounds.
+        "curve": curve[:40],
+    }
+
+
 async def prime_epg_cache(
-    receiver: Receiver, client: EnigmaClient, channels: list[Channel],
-    dwell_sec: float,
+    receiver: Receiver, client: EnigmaClient, channels: list[Channel], *,
+    min_sec: float, max_sec: float, flat_sec: float, sample_sec: float,
+    tour_max_sec: float = 1800,
 ) -> dict:
     """Zap through one channel per transponder so enigma2 reads each one's EPG
-    into its cache before we sweep it.
+    into its cache before we sweep it, dwelling on each until its EPG stops
+    growing.
 
     A box that was mains-cut boots with an empty EPG cache — enigma2 only gets a
     chance to write /etc/enigma2/epg.dat on a clean shutdown — and it can only
@@ -292,25 +378,61 @@ async def prime_epg_cache(
     freshly woken box yields exactly one transponder's worth of data (measured:
     13 of 2830 channels, all RTL-group).
 
+    The dwell is adaptive because a fixed one is wrong in both directions: a
+    single-channel transponder saturates in seconds while the 8-channel one needs
+    far longer, and broadcasters change how much schedule they transmit. Each
+    transponder's saturation time is logged, so the bounds can be re-tuned from
+    real numbers rather than guesswork.
+
     Zapping works in light standby and does not bring the box out of it, so the
     HDMI output stays dark for the whole tour. Only ever call this for a box we
     powered up ourselves — never zap a receiver someone is watching.
     """
     import asyncio
 
-    tour = transponder_tour(channels)
-    log.info("epg.prime_start", receiver=receiver.name, transponders=len(tour),
-             channels=len(channels), dwell_sec=dwell_sec)
+    groups = transponder_groups(channels)
+    log.info("epg.prime_start", receiver=receiver.name, transponders=len(groups),
+             channels=len(channels), min_sec=min_sec, max_sec=max_sec,
+             flat_sec=flat_sec)
+    loop = asyncio.get_running_loop()
+    tour_start = loop.time()
     visited = 0
-    for ch in tour:
-        if not await client.zap(ch.sref):
-            log.info("epg.prime_zap_failed", receiver=receiver.name, channel=ch.name)
+    saturated_times: list[int] = []
+    hit_ceiling = 0
+    unvisited = 0
+    for group in groups:
+        rep = group[0]
+        key = transponder_key(rep.sref)
+        if loop.time() - tour_start >= tour_max_sec:
+            # Out of budget: the rest keeps its stale data for one more night,
+            # which beats keeping the box powered indefinitely.
+            unvisited = len(groups) - visited
+            log.warning("epg.prime_budget_exhausted", receiver=receiver.name,
+                        visited=visited, unvisited=unvisited,
+                        tour_max_sec=tour_max_sec)
+            break
+        if not await client.zap(rep.sref):
+            log.info("epg.prime_zap_failed", receiver=receiver.name, channel=rep.name)
             continue
         visited += 1
-        await asyncio.sleep(dwell_sec)
+        stats = await _dwell_until_saturated(
+            client, group, min_sec=min_sec, max_sec=max_sec,
+            flat_sec=flat_sec, sample_sec=sample_sec)
+        if stats["reason"] == "ceiling":
+            hit_ceiling += 1
+        if stats["saturated_after_sec"] is not None:
+            saturated_times.append(stats["saturated_after_sec"])
+        log.info("epg.prime_transponder", receiver=receiver.name,
+                 transponder=":".join(key) if key else None,
+                 channel=rep.name, channels=len(group), **stats)
+    total_sec = round(loop.time() - tour_start)
     log.info("epg.prime_done", receiver=receiver.name,
-             visited=visited, transponders=len(tour))
-    return {"transponders": len(tour), "visited": visited}
+             visited=visited, transponders=len(groups), total_sec=total_sec,
+             hit_ceiling=hit_ceiling, unvisited=unvisited,
+             slowest_saturation_sec=max(saturated_times, default=None))
+    return {"transponders": len(groups), "visited": visited,
+            "total_sec": total_sec, "hit_ceiling": hit_ceiling,
+            "unvisited": unvisited}
 
 
 def get_now_next(channel_ids: list[int], db: Session) -> list[dict]:

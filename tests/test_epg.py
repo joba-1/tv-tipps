@@ -370,7 +370,10 @@ class TestRefreshNowNext:
 
 # ── Transponder priming (nightly zap tour) ────────────────────────────────────
 
-from app.services.epg import transponder_key, transponder_tour, prime_epg_cache  # noqa: E402
+from app.services.epg import (  # noqa: E402
+    transponder_key, transponder_tour, transponder_groups, prime_epg_cache,
+    _dwell_until_saturated,
+)
 
 
 class TestTransponderKey:
@@ -422,17 +425,36 @@ class TestTransponderTour:
         assert [c.name for c in transponder_tour([good, bad])] == ["Good"]
 
 
+class FakeTourClient:
+    """Zaps always succeed; each epgservice call returns `next(counts)` events
+    for the channel, so a test scripts how the box's cache fills over time."""
+
+    def __init__(self, counts_per_sample):
+        self.counts = list(counts_per_sample)
+        self.zapped: list[str] = []
+        self.samples = 0
+
+    async def zap(self, sref):
+        self.zapped.append(sref)
+        return True
+
+    async def get_epg_service(self, sref, hours=24):
+        self.samples += 1
+        n = self.counts[min(len(self.counts) - 1, self.samples - 1)]
+        return {"events": [
+            {"id": i, "begin_timestamp": 1000 + i * 60, "duration_sec": 60,
+             "title": f"E{i}", "shortdesc": "", "longdesc": ""}
+            for i in range(n)
+        ]}
+
+
+_BOUNDS = dict(min_sec=0, max_sec=1.0, flat_sec=0.02, sample_sec=0)
+
+
 class TestPrimeEpgCache:
     @pytest.mark.asyncio
-    async def test_visits_each_transponder_once(self, db: Session, monkeypatch):
+    async def test_visits_each_transponder_once(self, db: Session):
         from tests.conftest import make_channel, make_receiver
-        zapped: list[str] = []
-
-        class FakeClient:
-            async def zap(self, sref):
-                zapped.append(sref)
-                return True
-
         rcv = make_receiver(db)
         chans = [
             make_channel(db, sref="1:0:19:1:AAA:1:C00000:0:0:0:", name="A one"),
@@ -440,16 +462,18 @@ class TestPrimeEpgCache:
             make_channel(db, sref="1:0:19:3:BBB:1:C00000:0:0:0:", name="B one"),
         ]
         db.commit()
-        out = await prime_epg_cache(rcv, FakeClient(), chans, dwell_sec=0)
-        assert out == {"transponders": 2, "visited": 2}
-        assert len(zapped) == 2
+        client = FakeTourClient([5])
+        out = await prime_epg_cache(rcv, client, chans, **_BOUNDS)
+        assert out["transponders"] == 2
+        assert out["visited"] == 2
+        assert len(client.zapped) == 2
 
     @pytest.mark.asyncio
     async def test_failed_zap_does_not_abort_the_tour(self, db: Session):
         from tests.conftest import make_channel, make_receiver
         attempts: list[str] = []
 
-        class FlakyClient:
+        class FlakyClient(FakeTourClient):
             async def zap(self, sref):
                 attempts.append(sref)
                 return len(attempts) != 1  # first transponder refuses
@@ -460,6 +484,68 @@ class TestPrimeEpgCache:
             make_channel(db, sref="1:0:19:2:BBB:1:C00000:0:0:0:", name="B"),
         ]
         db.commit()
-        out = await prime_epg_cache(rcv, FlakyClient(), chans, dwell_sec=0)
+        out = await prime_epg_cache(rcv, FlakyClient([3]), chans, **_BOUNDS)
         assert len(attempts) == 2      # kept going
         assert out["visited"] == 1     # but only one landed
+
+
+class TestDwellUntilSaturated:
+    """The dwell is adaptive: hold the transponder while its EPG grows, move on
+    once it has been flat long enough to rule out a mid-carousel lull."""
+
+    @pytest.fixture
+    def one_channel(self, db: Session):
+        from tests.conftest import make_channel
+        ch = make_channel(db, sref="1:0:19:1:AAA:1:C00000:0:0:0:", name="A")
+        db.commit()
+        return [ch]
+
+    @pytest.mark.asyncio
+    async def test_stops_once_the_count_goes_flat(self, one_channel):
+        client = FakeTourClient([10, 20, 30, 30, 30, 30, 30, 30])
+        out = await _dwell_until_saturated(client, one_channel, min_sec=0,
+                                           max_sec=10, flat_sec=0, sample_sec=0.01)
+        assert out["reason"] == "saturated"
+        assert out["events"] == 30
+        assert client.samples < 8  # left before exhausting the script
+
+    @pytest.mark.asyncio
+    async def test_keeps_going_while_events_still_arrive(self, one_channel):
+        """A lull between EIT bursts must not be mistaken for saturation."""
+        client = FakeTourClient([10, 10, 10, 25, 25, 25, 25])
+        out = await _dwell_until_saturated(client, one_channel, min_sec=0,
+                                           max_sec=10, flat_sec=0.05, sample_sec=0.01)
+        assert out["events"] == 25
+
+    @pytest.mark.asyncio
+    async def test_ceiling_caps_a_transponder_that_never_settles(self, one_channel):
+        client = FakeTourClient(list(range(1, 500)))  # grows forever
+        out = await _dwell_until_saturated(client, one_channel, min_sec=0,
+                                           max_sec=0.05, flat_sec=10, sample_sec=0)
+        assert out["reason"] == "ceiling"
+
+    @pytest.mark.asyncio
+    async def test_floor_holds_before_the_first_sections_land(self, one_channel):
+        """An empty cache at t=0 is not a saturated one — min_sec must elapse."""
+        client = FakeTourClient([0, 0, 7, 7, 7, 7])
+        out = await _dwell_until_saturated(client, one_channel, min_sec=0.05,
+                                           max_sec=10, flat_sec=0, sample_sec=0.01)
+        assert out["events"] == 7
+
+    @pytest.mark.asyncio
+    async def test_reports_the_saturation_curve(self, one_channel):
+        client = FakeTourClient([4, 9, 9, 9])
+        out = await _dwell_until_saturated(client, one_channel, min_sec=0,
+                                           max_sec=10, flat_sec=0, sample_sec=0.01)
+        assert [c for _, c in out["curve"]] == [4, 9, 9]
+        assert out["saturated_after_sec"] is not None
+
+    @pytest.mark.asyncio
+    async def test_empty_transponder_leaves_early(self, one_channel):
+        """A transponder that yields nothing must not burn the whole ceiling."""
+        client = FakeTourClient([0])
+        out = await _dwell_until_saturated(client, one_channel, min_sec=0,
+                                           max_sec=10, flat_sec=0, sample_sec=0.01)
+        assert out["events"] == 0
+        assert out["reason"] == "saturated"
+        assert out["saturated_after_sec"] is None
