@@ -1,5 +1,6 @@
 from __future__ import annotations
 import json
+import time
 from pathlib import Path
 import httpx
 from app.logging_setup import get_logger
@@ -7,6 +8,9 @@ from app.logging_setup import get_logger
 log = get_logger(__name__)
 
 _TIMEOUT = httpx.Timeout(5.0)
+# A failure faster than this is a dropped keep-alive connection, not an
+# unreachable box — worth one retry on a fresh socket.
+_STALE_CONN_SEC = 0.3
 
 # One pooled client shared by all receivers (created lazily inside the running
 # loop, per-request timeouts). Closed from the app's lifespan shutdown.
@@ -25,6 +29,19 @@ async def aclose() -> None:
     if _client is not None:
         await _client.aclose()
         _client = None
+
+
+async def reset_pool() -> None:
+    """Drop every pooled connection, so the next request dials fresh.
+
+    A receiver entering or leaving standby silently drops the TCP connections we
+    keep alive. httpx hands the next request one of those dead sockets and it
+    fails instantly, which reads as "receiver offline" — that is what made the
+    nightly sweep skip a box we had just woken and confirmed reachable. Requests
+    already in flight (a concurrent poll) fail once and recover on their next
+    cycle; that is cheaper than a sweep that silently collects nothing.
+    """
+    await aclose()
 
 # RC key codes (Linux input event codes)
 RC_KEYS: dict[str, int] = {
@@ -82,12 +99,20 @@ class EnigmaClient:
     async def is_online(self) -> bool:
         # Tight timeout because this fires on every page-load via /api/receivers
         # and /api/remote/timers; a slow receiver shouldn't block the UI.
-        try:
-            r = await _get_client().head(f"{self.base_url}/api/about",
-                                         timeout=httpx.Timeout(1.5))
-            return r.status_code < 500
-        except (httpx.RequestError, httpx.HTTPStatusError):
-            return False
+        for attempt in (1, 2):
+            started = time.monotonic()
+            try:
+                r = await _get_client().head(f"{self.base_url}/api/about",
+                                             timeout=httpx.Timeout(1.5))
+                return r.status_code < 500
+            except (httpx.RequestError, httpx.HTTPStatusError):
+                # A keep-alive connection the box dropped (it does that on every
+                # standby transition) fails within milliseconds; httpx evicts it,
+                # so the retry gets a fresh socket. A genuinely unreachable box
+                # fails slowly — don't pay that timeout twice.
+                if attempt == 2 or time.monotonic() - started > _STALE_CONN_SEC:
+                    return False
+        return False
 
     async def get_power_state(self) -> str:
         """Returns 'on', 'standby', or 'unknown'.

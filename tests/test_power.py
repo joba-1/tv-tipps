@@ -25,7 +25,7 @@ def spy(monkeypatch):
     """Fake the power switch, the OpenWebif standby call and the online probe.
     `boots_after` = number of probes that fail before the box answers."""
     calls: dict = {"wake": 0, "standby": 0, "probes": 0, "sleeps": 0}
-    state = {"boots_after": 0, "standby_ok": True}
+    state = {"boots_after": 0, "standby_ok": True, "dead_after_standby": False}
 
     async def fake_wake(rcfg):
         calls["wake"] += 1
@@ -41,6 +41,8 @@ def spy(monkeypatch):
 
         async def is_online(self):
             calls["probes"] += 1
+            if calls["standby"] and state["dead_after_standby"]:
+                return False
             return calls["probes"] > state["boots_after"]
 
     monkeypatch.setattr(power, "wake_receiver", fake_wake)
@@ -58,9 +60,11 @@ class TestWakeForEpg:
         ok, reason = await power.wake_for_epg(_rcfg())
         assert (ok, reason) == (True, None)
         assert spy["calls"]["wake"] == 1
-        assert spy["calls"]["probes"] == 4
-        # Standby went out on that very probe, not one poll interval later.
+        # Standby went out on the 4th probe — the first that answered — not one
+        # poll interval later. The remaining probes are the post-standby settle
+        # check that keeps a mid-transition box out of the sweep.
         assert spy["calls"]["standby"] == 4
+        assert spy["calls"]["probes"] == 6
 
     @pytest.mark.asyncio
     async def test_reports_timeout_when_box_never_answers(self, spy, monkeypatch):
@@ -78,6 +82,16 @@ class TestWakeForEpg:
         ok, reason = await power.wake_for_epg(_rcfg())
         assert ok is True
         assert "standby failed" in reason
+
+    @pytest.mark.asyncio
+    async def test_box_unreachable_after_standby_is_reported(self, spy, monkeypatch):
+        """Entering standby drops the box's connections; if it never answers
+        again the sweep can't use it, and the caller must hear about it."""
+        spy["state"]["dead_after_standby"] = True
+        monkeypatch.setattr(power, "_WAKE_SETTLE_TIMEOUT_SEC", 0.05)
+        ok, reason = await power.wake_for_epg(_rcfg())
+        assert ok is True  # still powered on — caller must switch it back off
+        assert "unreachable" in reason
 
     @pytest.mark.asyncio
     async def test_no_probing_when_the_switch_fails(self, spy, monkeypatch):

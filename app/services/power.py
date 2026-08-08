@@ -123,6 +123,29 @@ async def wake_receiver(rcfg: ReceiverConfig) -> PowerResult:
 # to fire the standby command on the very first request that succeeds.
 _WAKE_BOOT_TIMEOUT_SEC = 240
 _WAKE_POLL_INTERVAL_SEC = 1.0
+# Entering standby tears down the box's open connections and enigma2 stops
+# accepting new ones for a moment, so the first probe right after the command
+# fails (measured: the very next request, 3 ms later, saw the box as offline and
+# the sweep skipped it — while a second later it answered /api/about in 42 ms).
+# Wait for it to answer again before declaring the box ready for the sweep.
+_WAKE_SETTLE_TIMEOUT_SEC = 60
+
+
+async def _await_reachable(client, timeout_sec: float) -> bool:
+    """Poll OpenWebif until it answers again. Two consecutive hits, because the
+    first request after a standby transition can succeed on a connection that
+    the box is about to drop."""
+    import asyncio
+
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + timeout_sec
+    hits = 0
+    while loop.time() < deadline:
+        hits = hits + 1 if await client.is_online() else 0
+        if hits >= 2:
+            return True
+        await asyncio.sleep(_WAKE_POLL_INTERVAL_SEC)
+    return False
 
 
 async def wake_for_epg(rcfg: ReceiverConfig) -> PowerResult:
@@ -138,7 +161,7 @@ async def wake_for_epg(rcfg: ReceiverConfig) -> PowerResult:
     never wake at all.
     """
     import asyncio
-    from app.enigma.client import EnigmaClient
+    from app.enigma.client import EnigmaClient, reset_pool
 
     ok, reason = await wake_receiver(rcfg)
     if not ok:
@@ -149,10 +172,18 @@ async def wake_for_epg(rcfg: ReceiverConfig) -> PowerResult:
     deadline = loop.time() + _WAKE_BOOT_TIMEOUT_SEC
     while loop.time() < deadline:
         if await client.is_online():
+            boot_sec = round(_WAKE_BOOT_TIMEOUT_SEC - (deadline - loop.time()))
             standby_ok, standby_reason = await openwebif_standby(rcfg)
-            log.info("power.epg_wake_up", receiver=rcfg.name,
-                     boot_sec=round(_WAKE_BOOT_TIMEOUT_SEC - (deadline - loop.time())),
-                     standby=standby_ok)
+            # The box drops its open connections on the way into standby. Bin
+            # the pool before the sweep inherits a dead socket and concludes the
+            # receiver is offline.
+            await reset_pool()
+            settled = await _await_reachable(client, _WAKE_SETTLE_TIMEOUT_SEC)
+            log.info("power.epg_wake_up", receiver=rcfg.name, boot_sec=boot_sec,
+                     standby=standby_ok, settled=settled)
+            if not settled:
+                return True, (f"unreachable {_WAKE_SETTLE_TIMEOUT_SEC}s after standby"
+                              " — EPG sweep will skip it")
             if not standby_ok:
                 # The box is up and answering, which is all the sweep needs —
                 # report success but keep the reason so the caller can log it.
