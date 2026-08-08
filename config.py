@@ -49,7 +49,13 @@ class Settings(BaseSettings):
     # a fixed dwell is wrong in both directions (a 1-channel transponder settles
     # in seconds, an 8-channel one needs much longer). MAX caps a transponder
     # that never settles; MIN guards against calling it before EIT starts.
-    epg_wake_dwell_min_sec: int = 15
+    # The floor, not the flat window, is what protects against an early plateau:
+    # a transponder whose first sample lands before the schedule tables arrive
+    # can read flat twice and exit with only present/following data. Several
+    # transponders did exactly that on 2026-08-09 (exit at the 15 s floor with
+    # saturated_after_sec=5, 5-8x fewer events than the night before), so the
+    # floor now outlasts that window.
+    epg_wake_dwell_min_sec: int = 25
     epg_wake_dwell_max_sec: int = 120
     # Measured 2026-08-08: across 19 transponders, growth never once paused for a
     # sample and resumed — the largest gap between two growth samples was 7 s, so
