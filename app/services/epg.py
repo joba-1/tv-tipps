@@ -257,6 +257,62 @@ async def refresh_epg_service(channel: Channel, client: EnigmaClient, db: Sessio
     return count
 
 
+def transponder_key(sref: str) -> tuple[str, str, str] | None:
+    """(TSID, ONID, namespace) from a service reference — enigma2's identity for
+    the transponder a channel sits on. Fields are
+    type:flags:serviceType:SID:TSID:ONID:namespace:…"""
+    parts = sref.split(":")
+    if len(parts) < 7:
+        return None
+    return parts[4].upper(), parts[5].upper(), parts[6].upper()
+
+
+def transponder_tour(channels: list[Channel]) -> list[Channel]:
+    """One channel per distinct transponder, so a zap tour visits each satellite
+    frequency exactly once. Deterministic (sorted by name) so consecutive nights
+    take the same route and the logs stay comparable."""
+    by_tp: dict[tuple[str, str, str], Channel] = {}
+    for ch in sorted(channels, key=lambda c: (c.name or "", c.sref)):
+        key = transponder_key(ch.sref)
+        if key and key not in by_tp:
+            by_tp[key] = ch
+    return list(by_tp.values())
+
+
+async def prime_epg_cache(
+    receiver: Receiver, client: EnigmaClient, channels: list[Channel],
+    dwell_sec: float,
+) -> dict:
+    """Zap through one channel per transponder so enigma2 reads each one's EPG
+    into its cache before we sweep it.
+
+    A box that was mains-cut boots with an empty EPG cache — enigma2 only gets a
+    chance to write /etc/enigma2/epg.dat on a clean shutdown — and it can only
+    see EPG for the transponder its tuner currently sits on. Without this tour a
+    freshly woken box yields exactly one transponder's worth of data (measured:
+    13 of 2830 channels, all RTL-group).
+
+    Zapping works in light standby and does not bring the box out of it, so the
+    HDMI output stays dark for the whole tour. Only ever call this for a box we
+    powered up ourselves — never zap a receiver someone is watching.
+    """
+    import asyncio
+
+    tour = transponder_tour(channels)
+    log.info("epg.prime_start", receiver=receiver.name, transponders=len(tour),
+             channels=len(channels), dwell_sec=dwell_sec)
+    visited = 0
+    for ch in tour:
+        if not await client.zap(ch.sref):
+            log.info("epg.prime_zap_failed", receiver=receiver.name, channel=ch.name)
+            continue
+        visited += 1
+        await asyncio.sleep(dwell_sec)
+    log.info("epg.prime_done", receiver=receiver.name,
+             visited=visited, transponders=len(tour))
+    return {"transponders": len(tour), "visited": visited}
+
+
 def get_now_next(channel_ids: list[int], db: Session) -> list[dict]:
     """Return current + next event for each channel. channel_ids may be empty (→ all).
     Three set-based queries instead of two per channel."""

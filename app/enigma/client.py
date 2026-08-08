@@ -79,22 +79,35 @@ class EnigmaClient:
             return json.loads(path.read_text())
         return None
 
-    async def _get(self, path: str, params: dict | None = None) -> dict | None:
+    async def _get(self, path: str, params: dict | None = None,
+                   idempotent: bool = True) -> dict | None:
         if self.mock:
             # Map path to fixture name (best effort)
             name = path.strip("/").replace("/", "_").split("?")[0]
             return self._load_fixture(name)
-        try:
-            r = await _get_client().get(f"{self.base_url}{path}",
-                                        params=params, timeout=_TIMEOUT)
-            r.raise_for_status()
-            return r.json()
-        except (httpx.RequestError, httpx.HTTPStatusError, ValueError) as e:
-            # Demoted to info: receivers go offline routinely (Intertechno cut,
-            # deep standby) — _infer_power_state turns this into the UI's "off"
-            # state. Worth noting, not an error.
-            log.info("enigma.request_failed", ip=self.ip, path=path, error=repr(e))
-            return None
+        for attempt in (1, 2):
+            started = time.monotonic()
+            try:
+                r = await _get_client().get(f"{self.base_url}{path}",
+                                            params=params, timeout=_TIMEOUT)
+                r.raise_for_status()
+                return r.json()
+            except (httpx.RequestError, httpx.HTTPStatusError, ValueError) as e:
+                # A connection the box dropped fails in milliseconds with
+                # something like RemoteProtocolError('illegal request line') —
+                # observed on the first zap after a standby transition. Retry
+                # that on a fresh socket; a real outage fails slowly and is not
+                # retried. Non-idempotent calls (keypresses, timer writes) never
+                # retry: a request the box did receive must not run twice.
+                fast = time.monotonic() - started <= _STALE_CONN_SEC
+                if attempt == 1 and idempotent and fast:
+                    continue
+                # Demoted to info: receivers go offline routinely (Intertechno
+                # cut, deep standby) — _infer_power_state turns this into the
+                # UI's "off" state. Worth noting, not an error.
+                log.info("enigma.request_failed", ip=self.ip, path=path, error=repr(e))
+                return None
+        return None
 
     async def is_online(self) -> bool:
         # Tight timeout because this fires on every page-load via /api/receivers
@@ -167,7 +180,7 @@ class EnigmaClient:
     async def delete_timer(self, sref: str, begin: int, end: int) -> bool:
         """Cancel a timer matching sref+begin+end (exact epoch seconds)."""
         params = {"sRef": sref, "begin": str(begin), "end": str(end)}
-        data = await self._get("/api/timerdelete", params=params)
+        data = await self._get("/api/timerdelete", params=params, idempotent=False)
         return bool(data and data.get("result"))
 
     async def add_timer(
@@ -192,14 +205,15 @@ class EnigmaClient:
         }
         if eit is not None:
             params["eit"] = str(eit)
-        return await self._get("/api/timeradd", params=params)
+        return await self._get("/api/timeradd", params=params, idempotent=False)
 
     async def send_key(self, key_name: str) -> bool:
         code = RC_KEYS.get(key_name)
         if code is None:
             log.warning("enigma.unknown_key", key=key_name)
             return False
-        data = await self._get("/api/remotecontrol", params={"command": code})
+        data = await self._get("/api/remotecontrol", params={"command": code},
+                               idempotent=False)
         return bool(data and data.get("result"))
 
     async def screenshot(self) -> bytes | None:

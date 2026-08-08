@@ -42,6 +42,11 @@ class Settings(BaseSettings):
     min_watch_sec: int = 300
     epg_full_refresh_hour: int = 3
     epg_retention_days: int = 30
+    # Seconds the nightly zap tour dwells on each transponder before moving on.
+    # A box woken from mains-off boots with an empty EPG cache and only sees the
+    # transponder it is tuned to, so the tour is what makes the sweep worth
+    # running; the dwell is how long enigma2 gets to read that transponder's EIT.
+    epg_wake_dwell_sec: int = 45
     # Viewing sessions older than this are pruned nightly. They stop feeding
     # the taste profile after 30 days anyway and only pin their EPG events
     # against cleanup; keep a generous window for the admin activity view.

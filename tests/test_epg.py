@@ -366,3 +366,100 @@ class TestRefreshNowNext:
         score = db.query(models.UserEventScore).one()
         assert score.stale is True
         assert enqueued and ev.id in enqueued[0]
+
+
+# ── Transponder priming (nightly zap tour) ────────────────────────────────────
+
+from app.services.epg import transponder_key, transponder_tour, prime_epg_cache  # noqa: E402
+
+
+class TestTransponderKey:
+    def test_extracts_tsid_onid_namespace(self):
+        # type:flags:serviceType:SID:TSID:ONID:namespace:...
+        assert transponder_key("1:0:19:2B98:3F2:1:C00000:0:0:0:") == ("3F2", "1", "C00000")
+
+    def test_same_transponder_different_service(self):
+        a = transponder_key("1:0:19:2B98:3F2:1:C00000:0:0:0:")
+        b = transponder_key("1:0:19:2B99:3F2:1:C00000:0:0:0:")
+        assert a == b
+
+    def test_case_insensitive(self):
+        assert (transponder_key("1:0:19:2b98:3f2:1:c00000:0:0:0:")
+                == transponder_key("1:0:19:2B98:3F2:1:C00000:0:0:0:"))
+
+    def test_malformed_sref(self):
+        assert transponder_key("1:0:19") is None
+        assert transponder_key("") is None
+
+
+class TestTransponderTour:
+    def test_one_channel_per_transponder(self, db: Session):
+        from tests.conftest import make_channel
+        a1 = make_channel(db, sref="1:0:19:1:AAA:1:C00000:0:0:0:", name="A one")
+        a2 = make_channel(db, sref="1:0:19:2:AAA:1:C00000:0:0:0:", name="A two")
+        b1 = make_channel(db, sref="1:0:19:3:BBB:1:C00000:0:0:0:", name="B one")
+        db.commit()
+        tour = transponder_tour([a1, a2, b1])
+        assert len(tour) == 2
+        assert {transponder_key(c.sref) for c in tour} == {("AAA", "1", "C00000"),
+                                                           ("BBB", "1", "C00000")}
+
+    def test_deterministic_route(self, db: Session):
+        from tests.conftest import make_channel
+        x = make_channel(db, sref="1:0:19:1:AAA:1:C00000:0:0:0:", name="Zeta")
+        y = make_channel(db, sref="1:0:19:2:AAA:1:C00000:0:0:0:", name="Alpha")
+        db.commit()
+        # Same transponder → the alphabetically first channel represents it,
+        # whichever order they arrive in.
+        assert transponder_tour([x, y])[0].name == "Alpha"
+        assert transponder_tour([y, x])[0].name == "Alpha"
+
+    def test_malformed_srefs_skipped(self, db: Session):
+        from tests.conftest import make_channel
+        good = make_channel(db, sref="1:0:19:1:AAA:1:C00000:0:0:0:", name="Good")
+        bad = make_channel(db, sref="nonsense", name="Bad")
+        db.commit()
+        assert [c.name for c in transponder_tour([good, bad])] == ["Good"]
+
+
+class TestPrimeEpgCache:
+    @pytest.mark.asyncio
+    async def test_visits_each_transponder_once(self, db: Session, monkeypatch):
+        from tests.conftest import make_channel, make_receiver
+        zapped: list[str] = []
+
+        class FakeClient:
+            async def zap(self, sref):
+                zapped.append(sref)
+                return True
+
+        rcv = make_receiver(db)
+        chans = [
+            make_channel(db, sref="1:0:19:1:AAA:1:C00000:0:0:0:", name="A one"),
+            make_channel(db, sref="1:0:19:2:AAA:1:C00000:0:0:0:", name="A two"),
+            make_channel(db, sref="1:0:19:3:BBB:1:C00000:0:0:0:", name="B one"),
+        ]
+        db.commit()
+        out = await prime_epg_cache(rcv, FakeClient(), chans, dwell_sec=0)
+        assert out == {"transponders": 2, "visited": 2}
+        assert len(zapped) == 2
+
+    @pytest.mark.asyncio
+    async def test_failed_zap_does_not_abort_the_tour(self, db: Session):
+        from tests.conftest import make_channel, make_receiver
+        attempts: list[str] = []
+
+        class FlakyClient:
+            async def zap(self, sref):
+                attempts.append(sref)
+                return len(attempts) != 1  # first transponder refuses
+
+        rcv = make_receiver(db)
+        chans = [
+            make_channel(db, sref="1:0:19:1:AAA:1:C00000:0:0:0:", name="A"),
+            make_channel(db, sref="1:0:19:2:BBB:1:C00000:0:0:0:", name="B"),
+        ]
+        db.commit()
+        out = await prime_epg_cache(rcv, FlakyClient(), chans, dwell_sec=0)
+        assert len(attempts) == 2      # kept going
+        assert out["visited"] == 1     # but only one landed

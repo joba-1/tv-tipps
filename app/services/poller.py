@@ -332,6 +332,8 @@ async def _nightly_full_sweep() -> None:
     """
     woken = await _wake_epg_receivers()
     try:
+        for rcfg in woken:
+            await _prime_woken_receiver(rcfg)
         await _refresh_all_epg(full=True)
     finally:
         # Always hand the boxes back the way we found them, even if the sweep
@@ -365,6 +367,41 @@ async def _wake_epg_receivers() -> list[ReceiverConfig]:
         else:
             log.warning("epg.wake_failed", receiver=rcfg.name, reason=reason)
     return woken
+
+
+async def _prime_woken_receiver(rcfg: ReceiverConfig) -> None:
+    """Zap-tour the transponders of the channels users actually see, so the box
+    has EPG for more than the one transponder it booted on.
+
+    Restricted to the visible channels (bouquet filters / favourites) because the
+    tour costs `epg_wake_dwell_sec` per transponder — sweeping every transponder
+    the box can tune would keep it powered up for hours.
+    """
+    from app.models import User
+    from app.services.channels import get_channels_for_user
+    from app.services.epg import prime_epg_cache
+
+    db = SessionLocal()
+    try:
+        receiver = db.query(Receiver).filter_by(name=rcfg.name).first()
+        if not receiver:
+            return
+        visible: dict[int, Any] = {}
+        for user in db.query(User).all():
+            for ch in get_channels_for_user(user.id, db):
+                visible[ch.id] = ch
+        if not visible:
+            log.info("epg.prime_skip", receiver=rcfg.name, reason="no visible channels")
+            return
+        client = EnigmaClient(rcfg.ip, mock=settings.mock_receivers)
+        await prime_epg_cache(receiver, client, list(visible.values()),
+                              dwell_sec=settings.epg_wake_dwell_sec)
+    except Exception as e:
+        # A failed tour costs us data, not correctness — the sweep still runs on
+        # whatever the box already had.
+        log.warning("epg.prime_failed", receiver=rcfg.name, error=str(e))
+    finally:
+        db.close()
 
 
 async def _refresh_all_channels() -> None:

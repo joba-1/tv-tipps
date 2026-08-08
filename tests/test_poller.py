@@ -205,7 +205,7 @@ class TestNightlyEpgWake:
 
     @pytest.fixture
     def wake_env(self, env, monkeypatch):
-        calls = SimpleNamespace(woken=[], slept=[], swept=0)
+        calls = SimpleNamespace(woken=[], slept=[], swept=0, primed=[])
 
         async def fake_wake(rcfg):
             calls.woken.append(rcfg.name)
@@ -218,9 +218,13 @@ class TestNightlyEpgWake:
         async def fake_sweep(full=False):
             calls.swept += 1
 
+        async def fake_prime(rcfg):
+            calls.primed.append(rcfg.name)
+
         monkeypatch.setattr(poller, "wake_for_epg", fake_wake)
         monkeypatch.setattr(poller, "sleep_receiver", fake_sleep)
         monkeypatch.setattr(poller, "_refresh_all_epg", fake_sweep)
+        monkeypatch.setattr(poller, "_prime_woken_receiver", fake_prime)
         return SimpleNamespace(env=env, calls=calls)
 
     def _flag(self, env, *, epg_wake: bool) -> None:
@@ -278,3 +282,20 @@ class TestNightlyEpgWake:
         with pytest.raises(RuntimeError):
             await poller._nightly_full_sweep()
         assert wake_env.calls.slept == ["box1"]
+
+    @pytest.mark.asyncio
+    async def test_woken_receiver_is_zap_toured_before_the_sweep(self, wake_env):
+        self._flag(wake_env.env, epg_wake=True)
+        FAKE["online"] = False
+        await poller._nightly_full_sweep()
+        assert wake_env.calls.primed == ["box1"]
+
+    @pytest.mark.asyncio
+    async def test_receiver_someone_is_watching_is_never_zapped(self, wake_env):
+        """The tour retunes the box. A receiver that was already on is not ours
+        to touch — it is only ever swept."""
+        self._flag(wake_env.env, epg_wake=True)
+        FAKE["online"] = True
+        await poller._nightly_full_sweep()
+        assert wake_env.calls.primed == []
+        assert wake_env.calls.swept == 1

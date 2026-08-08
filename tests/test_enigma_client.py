@@ -97,3 +97,73 @@ class TestResetPool:
         monkeypatch.setattr(ec, "_client", None)
         await ec.reset_pool()  # must not raise
         assert ec._client is None
+
+
+class FakeHttpGet:
+    """`script` is one outcome per GET: a dict payload, or an exception."""
+
+    def __init__(self, script, delay=0.0):
+        self.script = list(script)
+        self.delay = delay
+        self.calls = 0
+
+    async def get(self, url, params=None, timeout=None):
+        self.calls += 1
+        outcome = self.script.pop(0) if self.script else {"result": True}
+        if isinstance(outcome, Exception):
+            if self.delay:
+                import time
+                time.sleep(self.delay)
+            raise outcome
+        return httpx.Response(200, json=outcome, request=httpx.Request("GET", url))
+
+
+class TestGetRetry:
+    """The first zap after a standby transition failed with
+    RemoteProtocolError('illegal request line') — a dropped keep-alive, not an
+    unreachable box — and cost the whole transponder."""
+
+    @pytest.fixture
+    def fake_get(self, monkeypatch):
+        def install(script, delay=0.0):
+            fake = FakeHttpGet(script, delay)
+            monkeypatch.setattr(ec, "_get_client", lambda: fake)
+            return fake
+        return install
+
+    @pytest.mark.asyncio
+    async def test_zap_retries_a_dropped_connection(self, fake_get):
+        fake = fake_get([httpx.RemoteProtocolError("illegal request line"),
+                         {"result": True}])
+        assert await ec.EnigmaClient("10.0.0.1").zap("1:0:19:1:AAA:1:C00000:0:0:0:") is True
+        assert fake.calls == 2
+
+    @pytest.mark.asyncio
+    async def test_slow_failure_is_not_retried(self, fake_get):
+        fake = fake_get([httpx.ConnectTimeout("timed out")],
+                        delay=ec._STALE_CONN_SEC + 0.05)
+        assert await ec.EnigmaClient("10.0.0.1").get_current() is None
+        assert fake.calls == 1
+
+    @pytest.mark.asyncio
+    async def test_keypress_is_never_retried(self, fake_get):
+        """A remote-control command the box did receive must not fire twice."""
+        fake = fake_get([httpx.RemoteProtocolError("illegal request line"),
+                         {"result": True}])
+        assert await ec.EnigmaClient("10.0.0.1").send_key("power") is False
+        assert fake.calls == 1
+
+    @pytest.mark.asyncio
+    async def test_timer_write_is_never_retried(self, fake_get):
+        fake = fake_get([httpx.RemoteProtocolError("illegal request line"),
+                         {"result": True}])
+        assert await ec.EnigmaClient("10.0.0.1").add_timer(
+            "1:0:19:1:AAA:1:C00000:0:0:0:", 100, 200, "Show") is None
+        assert fake.calls == 1
+
+    @pytest.mark.asyncio
+    async def test_two_failures_give_up(self, fake_get):
+        fake = fake_get([httpx.RemoteProtocolError("boom"),
+                         httpx.RemoteProtocolError("boom")])
+        assert await ec.EnigmaClient("10.0.0.1").get_current() is None
+        assert fake.calls == 2
