@@ -167,3 +167,83 @@ class TestGetRetry:
                          httpx.RemoteProtocolError("boom")])
         assert await ec.EnigmaClient("10.0.0.1").get_current() is None
         assert fake.calls == 2
+
+
+class TestUserClaim:
+    """A box recording from standby reports instandby=true, so the power probe
+    alone cannot tell it apart from an idle one. The zap tour survives that
+    (enigma2 refuses to retune a busy tuner) — the mains switch does not."""
+
+    @pytest.fixture
+    def box(self, monkeypatch):
+        state = {"power": "standby", "timers": []}
+
+        async def fake_get(self, path, params=None, idempotent=True):
+            if path == "/api/powerstate":
+                return {"instandby": state["power"] != "on"}
+            if path == "/api/timerlist":
+                return {"timers": state["timers"]}
+            return None
+
+        monkeypatch.setattr(ec.EnigmaClient, "_get", fake_get)
+        return state
+
+    def _timer(self, **kw):
+        import time
+        base = {"begin": time.time() - 60, "end": time.time() + 600,
+                "state": 2, "disabled": 0, "justplay": 0}
+        base.update(kw)
+        return base
+
+    @pytest.mark.asyncio
+    async def test_idle_box_is_ours(self, box):
+        assert await ec.EnigmaClient("10.0.0.1").user_claim() is None
+
+    @pytest.mark.asyncio
+    async def test_viewer_wins(self, box):
+        box["power"] = "on"
+        assert await ec.EnigmaClient("10.0.0.1").user_claim() == "viewer"
+
+    @pytest.mark.asyncio
+    async def test_running_recording_claims_the_box(self, box):
+        box["timers"] = [self._timer()]
+        assert await ec.EnigmaClient("10.0.0.1").user_claim() == "recording"
+
+    @pytest.mark.asyncio
+    async def test_state_missing_falls_back_to_the_time_window(self, box):
+        box["timers"] = [self._timer(state=None)]
+        assert await ec.EnigmaClient("10.0.0.1").is_recording() is True
+
+    @pytest.mark.asyncio
+    async def test_finished_timer_does_not_claim(self, box):
+        import time
+        box["timers"] = [self._timer(state=3, begin=time.time() - 7200,
+                                     end=time.time() - 3600)]
+        assert await ec.EnigmaClient("10.0.0.1").is_recording() is False
+
+    @pytest.mark.asyncio
+    async def test_future_timer_does_not_claim(self, box):
+        import time
+        box["timers"] = [self._timer(state=0, begin=time.time() + 3600,
+                                     end=time.time() + 7200)]
+        assert await ec.EnigmaClient("10.0.0.1").is_recording() is False
+
+    @pytest.mark.asyncio
+    async def test_disabled_timer_does_not_claim(self, box):
+        box["timers"] = [self._timer(disabled=1)]
+        assert await ec.EnigmaClient("10.0.0.1").is_recording() is False
+
+    @pytest.mark.asyncio
+    async def test_zap_timer_does_not_claim(self, box):
+        """justplay only changes channel — no file to protect."""
+        box["timers"] = [self._timer(justplay=1)]
+        assert await ec.EnigmaClient("10.0.0.1").is_recording() is False
+
+    @pytest.mark.asyncio
+    async def test_unreachable_box_is_not_claimed(self, box, monkeypatch):
+        async def dead(self, path, params=None, idempotent=True):
+            return None
+        monkeypatch.setattr(ec.EnigmaClient, "_get", dead)
+        # power_state "unknown" and no timer list: nothing says hands off, so the
+        # caller may still cut the mains on a hung box.
+        assert await ec.EnigmaClient("10.0.0.1").user_claim() is None

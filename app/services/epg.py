@@ -424,11 +424,12 @@ async def prime_epg_cache(
     for group in groups:
         rep = group[0]
         key = transponder_key(rep.sref)
-        if await client.get_power_state() == "on":
+        claim = await client.user_claim()
+        if claim:
             aborted = True
             unvisited = len(groups) - visited
             log.warning("epg.prime_aborted_user_active", receiver=receiver.name,
-                        visited=visited, unvisited=unvisited)
+                        claim=claim, visited=visited, unvisited=unvisited)
             break
         if loop.time() - tour_start >= tour_max_sec:
             # Out of budget: the rest keeps its stale data for one more night,

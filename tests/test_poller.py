@@ -20,7 +20,7 @@ SREF_A = "1:0:1:AAAA:1:1:0:0:0:0:"
 SREF_B = "1:0:1:BBBB:1:1:0:0:0:0:"
 
 # Per-test knobs the fake client reads on every call.
-FAKE = {"power": "on", "sref": SREF_A, "online": True}
+FAKE = {"power": "on", "sref": SREF_A, "online": True, "recording": False}
 
 
 class FakeEnigmaClient:
@@ -29,6 +29,11 @@ class FakeEnigmaClient:
 
     async def is_online(self):
         return FAKE["online"]
+
+    async def user_claim(self):
+        if FAKE["power"] == "on":
+            return "viewer"
+        return "recording" if FAKE["recording"] else None
 
     async def get_power_state(self):
         return FAKE["power"]
@@ -56,7 +61,7 @@ def env(monkeypatch):
     monkeypatch.setattr(poller, "EnigmaClient", FakeEnigmaClient)
     poller._state.clear()
     active_viewer._active.clear()
-    FAKE.update({"power": "on", "sref": SREF_A, "online": True})
+    FAKE.update({"power": "on", "sref": SREF_A, "online": True, "recording": False})
 
     db = TestSession()
     now = utcnow()
@@ -228,6 +233,7 @@ class TestNightlyEpgWake:
         # A receiver we woke for EPG sits in light standby; "on" is the signal
         # that a person switched it on and it is no longer ours to power off.
         FAKE["power"] = "standby"
+        FAKE["recording"] = False
         return SimpleNamespace(env=env, calls=calls)
 
     def _flag(self, env, *, epg_wake: bool) -> None:
@@ -313,6 +319,21 @@ class TestNightlyEpgWake:
         monkeypatch.setattr(poller, "_refresh_all_epg", sweep_then_user_turns_it_on)
         await poller._nightly_full_sweep()
         assert wake_env.calls.slept == []   # mains left alone
+
+    @pytest.mark.asyncio
+    async def test_recording_box_keeps_its_power(self, wake_env, monkeypatch):
+        """The zap tour cannot hurt a recording — enigma2 refuses to retune a
+        busy tuner — but cutting the mains would truncate the file."""
+        self._flag(wake_env.env, epg_wake=True)
+        FAKE["online"] = False
+
+        async def sweep_then_a_timer_fires(full=False):
+            wake_env.calls.swept += 1
+            FAKE["recording"] = True
+
+        monkeypatch.setattr(poller, "_refresh_all_epg", sweep_then_a_timer_fires)
+        await poller._nightly_full_sweep()
+        assert wake_env.calls.slept == []
 
     @pytest.mark.asyncio
     async def test_woken_receiver_is_zap_toured_before_the_sweep(self, wake_env):

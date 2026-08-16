@@ -344,8 +344,12 @@ async def _nightly_full_sweep() -> None:
         # whatever they are watching.
         for rcfg in woken:
             client = EnigmaClient(rcfg.ip, mock=settings.mock_receivers)
-            if await client.get_power_state() == "on":
-                log.info("epg.wake_left_on_user_active", receiver=rcfg.name)
+            claim = await client.user_claim()
+            if claim:
+                # A recording survives the zap tour — enigma2 refuses to retune
+                # a busy tuner — but it would not survive the mains switch.
+                log.info("epg.wake_left_on_user_active", receiver=rcfg.name,
+                         claim=claim)
                 continue
             ok, reason = await shutdown_for_epg(rcfg)
             log.info("epg.wake_sleep_back", receiver=rcfg.name, ok=ok, reason=reason)

@@ -471,9 +471,15 @@ class FakeTourClient:
         self.samples = 0
         # A box we woke sits in light standby; "on" means a person took it over.
         self.power = power
+        self.recording = False
 
     async def get_power_state(self):
         return self.power
+
+    async def user_claim(self):
+        if self.power == "on":
+            return "viewer"
+        return "recording" if self.recording else None
 
     async def zap(self, sref):
         self.zapped.append(sref)
@@ -633,3 +639,20 @@ class TestTourStopsForTheUser:
         out = await prime_epg_cache(rcv, FakeTourClient([5]), chans, **_BOUNDS)
         assert out["aborted"] is False
         assert out["visited"] == 2
+
+    @pytest.mark.asyncio
+    async def test_tour_aborts_for_a_standby_recording(self, db: Session):
+        """A recording box still reports instandby=true, so only the timer list
+        gives it away."""
+        from tests.conftest import make_channel, make_receiver
+        rcv = make_receiver(db)
+        chans = [
+            make_channel(db, sref="1:0:19:1:AAA:1:C00000:0:0:0:", name="A"),
+            make_channel(db, sref="1:0:19:2:BBB:1:C00000:0:0:0:", name="B"),
+        ]
+        db.commit()
+        client = FakeTourClient([5])
+        client.recording = True
+        out = await prime_epg_cache(rcv, client, chans, **_BOUNDS)
+        assert out["aborted"] is True
+        assert client.zapped == []

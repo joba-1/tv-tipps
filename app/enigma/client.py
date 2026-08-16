@@ -11,6 +11,8 @@ _TIMEOUT = httpx.Timeout(5.0)
 # A failure faster than this is a dropped keep-alive connection, not an
 # unreachable box — worth one retry on a fresh socket.
 _STALE_CONN_SEC = 0.3
+# OpenWebif timerlist state: 0 waiting, 1 prepared, 2 running, 3 ended.
+_TIMER_STATE_RUNNING = 2
 
 # One pooled client shared by all receivers (created lazily inside the running
 # loop, per-request timeouts). Closed from the app's lifespan shutdown.
@@ -176,6 +178,37 @@ class EnigmaClient:
         if not data:
             return []
         return data.get("timers", []) or []
+
+    async def is_recording(self) -> bool:
+        """Is a timer writing a file right now?
+
+        A box recording from standby still reports `instandby: true`, so the
+        power-state probe cannot see it. That matters for the mains switch: a
+        recording survives our zap tour (enigma2 refuses to retune a busy tuner)
+        but not a power cut. `justplay` timers only change channel and hold no
+        file, so they do not count."""
+        now = time.time()
+        for t in await self.list_timers():
+            if t.get("disabled") or t.get("justplay"):
+                continue
+            if t.get("state") == _TIMER_STATE_RUNNING:
+                return True
+            # Firmwares that don't report state: fall back to the time window.
+            begin, end = t.get("begin"), t.get("end")
+            if (isinstance(begin, (int, float)) and isinstance(end, (int, float))
+                    and begin <= now <= end):
+                return True
+        return False
+
+    async def user_claim(self) -> str | None:
+        """Who owns the box right now — "viewer", "recording", or None if it is
+        ours to zap around and switch off. Both answers mean hands off: someone
+        is watching, or a timer is mid-recording."""
+        if await self.get_power_state() == "on":
+            return "viewer"
+        if await self.is_recording():
+            return "recording"
+        return None
 
     async def delete_timer(self, sref: str, begin: int, end: int) -> bool:
         """Cancel a timer matching sref+begin+end (exact epoch seconds)."""
