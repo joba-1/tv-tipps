@@ -278,18 +278,25 @@ async def shutdown_for_epg(rcfg: ReceiverConfig) -> PowerResult:
         return await sleep_receiver(rcfg)
 
     ok, reason = await openwebif_deep_standby(rcfg)
-    if ok:
-        await reset_pool()
-        client = EnigmaClient(rcfg.ip, mock=settings.mock_receivers)
-        went_down = await _await_unreachable(client, _SHUTDOWN_TIMEOUT_SEC)
-        if went_down:
-            await asyncio.sleep(_SHUTDOWN_GRACE_SEC)
-        else:
-            log.warning("power.shutdown_not_confirmed", receiver=rcfg.name,
-                        timeout_sec=_SHUTDOWN_TIMEOUT_SEC)
-        log.info("power.clean_shutdown", receiver=rcfg.name, confirmed=went_down)
+    if not ok:
+        # A dropped response is exactly what a *successful* deep standby looks
+        # like: enigma2 dies mid-request and never finishes the reply. Measured
+        # 2026-08-16 — "Server disconnected without sending a response", and the
+        # mains were cut 422 ms later, most likely straight through the epg.dat
+        # write we were trying to protect. So the command's verdict decides
+        # nothing; only the box going quiet does.
+        log.info("power.deep_standby_unconfirmed", receiver=rcfg.name, reason=reason)
+
+    await reset_pool()
+    client = EnigmaClient(rcfg.ip, mock=settings.mock_receivers)
+    went_down = await _await_unreachable(client, _SHUTDOWN_TIMEOUT_SEC)
+    if went_down:
+        await asyncio.sleep(_SHUTDOWN_GRACE_SEC)
     else:
-        log.warning("power.deep_standby_failed", receiver=rcfg.name, reason=reason)
+        log.warning("power.shutdown_not_confirmed", receiver=rcfg.name,
+                    timeout_sec=_SHUTDOWN_TIMEOUT_SEC)
+    log.info("power.clean_shutdown", receiver=rcfg.name,
+             confirmed=went_down, command_ok=ok)
 
     return await sleep_receiver(rcfg)
 

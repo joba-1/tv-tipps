@@ -148,7 +148,7 @@ class TestShutdownForEpg:
     @pytest.fixture
     def steps(self, monkeypatch):
         seq: list[str] = []
-        state = {"deep_ok": True, "goes_down_after": 1}
+        state = {"deep_ok": True, "goes_down_after": 1, "probes": 0}
 
         async def fake_deep(rcfg):
             seq.append("deep_standby")
@@ -163,8 +163,8 @@ class TestShutdownForEpg:
                 self.probes = 0
 
             async def is_online(self):
-                self.probes += 1
-                return self.probes <= state["goes_down_after"]
+                state["probes"] += 1
+                return state["probes"] <= state["goes_down_after"]
 
         monkeypatch.setattr(power, "openwebif_deep_standby", fake_deep)
         monkeypatch.setattr(power, "sleep_receiver", fake_sleep)
@@ -186,6 +186,19 @@ class TestShutdownForEpg:
         steps["state"]["deep_ok"] = False
         ok, _ = await power.shutdown_for_epg(_rcfg())
         assert ok is True
+        assert steps["seq"] == ["deep_standby", "mains_off"]
+
+    @pytest.mark.asyncio
+    async def test_dropped_response_still_waits_for_the_box_to_go_quiet(self, steps):
+        """A dropped response is what a *successful* shutdown looks like —
+        enigma2 dies mid-request. Measured 2026-08-16: the command reported
+        failure and the mains were cut 422 ms later, straight through the
+        epg.dat write. The command's verdict must decide nothing."""
+        steps["state"]["deep_ok"] = False       # "Server disconnected"
+        steps["state"]["goes_down_after"] = 3   # box is still up for 3 probes
+        ok, _ = await power.shutdown_for_epg(_rcfg())
+        assert ok is True
+        assert steps["state"]["probes"] >= 5    # waited for it to go quiet
         assert steps["seq"] == ["deep_standby", "mains_off"]
 
     @pytest.mark.asyncio
