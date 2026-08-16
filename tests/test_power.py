@@ -101,3 +101,67 @@ class TestWakeForEpg:
         ok, reason = await power.wake_for_epg(_rcfg())
         assert (ok, reason) == (False, "gateway unreachable")
         assert spy["calls"]["probes"] == 0
+
+
+class TestShutdownForEpg:
+    """Cutting the mains is an unclean shutdown: enigma2 never writes epg.dat and
+    the box boots with an empty EPG cache. Deep standby first, mains after — but
+    the mains always come after, whatever happened before."""
+
+    @pytest.fixture
+    def steps(self, monkeypatch):
+        seq: list[str] = []
+        state = {"deep_ok": True, "goes_down_after": 1}
+
+        async def fake_deep(rcfg):
+            seq.append("deep_standby")
+            return (True, None) if state["deep_ok"] else (False, "HTTP 500")
+
+        async def fake_sleep(rcfg):
+            seq.append("mains_off")
+            return True, None
+
+        class FakeClient:
+            def __init__(self, ip, mock=False):
+                self.probes = 0
+
+            async def is_online(self):
+                self.probes += 1
+                return self.probes <= state["goes_down_after"]
+
+        monkeypatch.setattr(power, "openwebif_deep_standby", fake_deep)
+        monkeypatch.setattr(power, "sleep_receiver", fake_sleep)
+        monkeypatch.setattr(enigma_client, "EnigmaClient", FakeClient)
+        monkeypatch.setattr(power, "_WAKE_POLL_INTERVAL_SEC", 0)
+        monkeypatch.setattr(power, "_SHUTDOWN_GRACE_SEC", 0)
+        return {"seq": seq, "state": state}
+
+    @pytest.mark.asyncio
+    async def test_deep_standby_precedes_the_mains_cut(self, steps):
+        ok, _ = await power.shutdown_for_epg(_rcfg())
+        assert ok is True
+        assert steps["seq"] == ["deep_standby", "mains_off"]
+
+    @pytest.mark.asyncio
+    async def test_mains_cut_even_when_deep_standby_fails(self, steps):
+        """A box left powered because a command went unanswered is the one
+        outcome the user would notice."""
+        steps["state"]["deep_ok"] = False
+        ok, _ = await power.shutdown_for_epg(_rcfg())
+        assert ok is True
+        assert steps["seq"] == ["deep_standby", "mains_off"]
+
+    @pytest.mark.asyncio
+    async def test_mains_cut_even_when_the_box_never_goes_down(self, steps, monkeypatch):
+        steps["state"]["goes_down_after"] = 10**9  # answers forever
+        monkeypatch.setattr(power, "_SHUTDOWN_TIMEOUT_SEC", 0.05)
+        ok, _ = await power.shutdown_for_epg(_rcfg())
+        assert ok is True
+        assert steps["seq"][-1] == "mains_off"
+
+    @pytest.mark.asyncio
+    async def test_wol_receiver_is_left_reachable(self, steps):
+        """A WOL box must stay on the network or it can never be woken again —
+        no deep standby for those."""
+        ok, _ = await power.shutdown_for_epg(_rcfg(power_method="wol", wol_mac="00:11:22:33:44:55"))
+        assert steps["seq"] == ["mains_off"]  # i.e. plain sleep_receiver

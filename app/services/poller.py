@@ -10,7 +10,7 @@ from app.models import Receiver
 from app.enigma.client import EnigmaClient
 from app.services.channels import refresh_channels
 from app.services.epg import refresh_now_next, cleanup_old_events
-from app.services.power import wake_for_epg, sleep_receiver
+from app.services.power import wake_for_epg, shutdown_for_epg
 from app.logging_setup import get_logger
 from app.timezones import utcnow
 from config import ReceiverConfig, settings
@@ -340,7 +340,7 @@ async def _nightly_full_sweep() -> None:
         # raised — leaving a receiver powered up is the one outcome the user
         # would notice.
         for rcfg in woken:
-            ok, reason = await sleep_receiver(rcfg)
+            ok, reason = await shutdown_for_epg(rcfg)
             log.info("epg.wake_sleep_back", receiver=rcfg.name, ok=ok, reason=reason)
 
 
@@ -366,6 +366,13 @@ async def _wake_epg_receivers() -> list[ReceiverConfig]:
             woken.append(rcfg)
         else:
             log.warning("epg.wake_failed", receiver=rcfg.name, reason=reason)
+            # We sent the power-on command before the box failed to appear, so
+            # the mains may well be live with a receiver that never booted.
+            # Switching off is idempotent for a box that never came up, and the
+            # alternative is leaving it powered until someone notices.
+            off_ok, off_reason = await shutdown_for_epg(rcfg)
+            log.info("epg.wake_failed_powered_down", receiver=rcfg.name,
+                     ok=off_ok, reason=off_reason)
     return woken
 
 

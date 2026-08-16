@@ -37,25 +37,39 @@ async def _wol_wake(rcfg: ReceiverConfig) -> PowerResult:
         return False, f"WOL send failed: {e}"
 
 
-async def openwebif_standby(rcfg: ReceiverConfig) -> PowerResult:
-    """Put receiver into light standby via OpenWebif. Works regardless of
-    power_method as long as the box is currently reachable. `newstate` is
-    per-receiver (rcfg.standby_newstate) because firmwares differ — VTi uses 4,
-    openATV uses 5."""
-    url = f"http://{rcfg.ip}/api/powerstate?newstate={rcfg.standby_newstate}"
+_DEEP_STANDBY_NEWSTATE = 1  # OpenWebif: 1 = deep standby (a real enigma2 shutdown)
+
+
+async def _openwebif_powerstate(rcfg: ReceiverConfig, newstate: int,
+                                what: str) -> PowerResult:
+    url = f"http://{rcfg.ip}/api/powerstate?newstate={newstate}"
     try:
         async with httpx.AsyncClient(timeout=5) as client:
             resp = await client.get(url)
             if resp.status_code == 200:
                 log.info("power.standby_sent", receiver=rcfg.name, ok=True,
-                         newstate=rcfg.standby_newstate)
+                         newstate=newstate, kind=what)
                 return True, None
             log.info("power.standby_sent", receiver=rcfg.name, ok=False,
-                     status=resp.status_code, newstate=rcfg.standby_newstate)
+                     status=resp.status_code, newstate=newstate, kind=what)
             return False, f"OpenWebif returned HTTP {resp.status_code}"
     except Exception as e:
         log.debug("power.standby_skipped", receiver=rcfg.name, reason="unreachable")
         return False, f"OpenWebif unreachable: {e}"
+
+
+async def openwebif_standby(rcfg: ReceiverConfig) -> PowerResult:
+    """Put receiver into light standby via OpenWebif. Works regardless of
+    power_method as long as the box is currently reachable. `newstate` is
+    per-receiver (rcfg.standby_newstate) because firmwares differ — VTi uses 4,
+    openATV uses 5."""
+    return await _openwebif_powerstate(rcfg, rcfg.standby_newstate, "light")
+
+
+async def openwebif_deep_standby(rcfg: ReceiverConfig) -> PowerResult:
+    """Shut enigma2 down properly. Unlike light standby this ends the process,
+    which is what makes it flush its EPG cache to /etc/enigma2/epg.dat."""
+    return await _openwebif_powerstate(rcfg, _DEEP_STANDBY_NEWSTATE, "deep")
 
 
 # Backwards-compat alias — sleep_receiver still routes here for WOL boxes.
@@ -194,6 +208,66 @@ async def wake_for_epg(rcfg: ReceiverConfig) -> PowerResult:
     log.warning("power.epg_wake_timeout", receiver=rcfg.name,
                 timeout_sec=_WAKE_BOOT_TIMEOUT_SEC)
     return False, f"receiver did not come up within {_WAKE_BOOT_TIMEOUT_SEC}s"
+
+
+# Clean shutdown before pulling the mains: how long we wait for enigma2 to
+# actually go down, and how long we let the flash settle afterwards.
+_SHUTDOWN_TIMEOUT_SEC = 90
+_SHUTDOWN_GRACE_SEC = 5
+
+
+async def _await_unreachable(client, timeout_sec: float) -> bool:
+    """Wait until the box stops answering — our only visible sign that enigma2
+    has finished shutting down. Two consecutive misses, so a blip mid-shutdown
+    doesn't read as "down" while it is still writing."""
+    import asyncio
+
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + timeout_sec
+    misses = 0
+    while loop.time() < deadline:
+        misses = 0 if await client.is_online() else misses + 1
+        if misses >= 2:
+            return True
+        await asyncio.sleep(_WAKE_POLL_INTERVAL_SEC)
+    return False
+
+
+async def shutdown_for_epg(rcfg: ReceiverConfig) -> PowerResult:
+    """Put a box away after an EPG sweep, giving enigma2 the chance to persist
+    its EPG cache first.
+
+    Cutting the mains is an unclean shutdown: enigma2 never writes
+    /etc/enigma2/epg.dat, so the box boots with an empty EPG cache every single
+    night and can only offer the transponder it happens to be tuned to. That is
+    what makes each night's harvest a lottery. Deep standby ends the process
+    properly, so the next boot starts warm and the zap tour only has to top up.
+
+    The mains are cut either way — a receiver left powered because a shutdown
+    command went unanswered is the one outcome the user would actually notice.
+    """
+    import asyncio
+    from app.enigma.client import EnigmaClient, reset_pool
+
+    if rcfg.power_method != "intertechno":
+        # WOL boxes must stay reachable on the network to be woken again.
+        return await sleep_receiver(rcfg)
+
+    ok, reason = await openwebif_deep_standby(rcfg)
+    if ok:
+        await reset_pool()
+        client = EnigmaClient(rcfg.ip, mock=settings.mock_receivers)
+        went_down = await _await_unreachable(client, _SHUTDOWN_TIMEOUT_SEC)
+        if went_down:
+            await asyncio.sleep(_SHUTDOWN_GRACE_SEC)
+        else:
+            log.warning("power.shutdown_not_confirmed", receiver=rcfg.name,
+                        timeout_sec=_SHUTDOWN_TIMEOUT_SEC)
+        log.info("power.clean_shutdown", receiver=rcfg.name, confirmed=went_down)
+    else:
+        log.warning("power.deep_standby_failed", receiver=rcfg.name, reason=reason)
+
+    return await sleep_receiver(rcfg)
 
 
 async def sleep_receiver(rcfg: ReceiverConfig) -> PowerResult:

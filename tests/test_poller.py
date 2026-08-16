@@ -222,7 +222,7 @@ class TestNightlyEpgWake:
             calls.primed.append(rcfg.name)
 
         monkeypatch.setattr(poller, "wake_for_epg", fake_wake)
-        monkeypatch.setattr(poller, "sleep_receiver", fake_sleep)
+        monkeypatch.setattr(poller, "shutdown_for_epg", fake_sleep)
         monkeypatch.setattr(poller, "_refresh_all_epg", fake_sweep)
         monkeypatch.setattr(poller, "_prime_woken_receiver", fake_prime)
         return SimpleNamespace(env=env, calls=calls)
@@ -262,15 +262,28 @@ class TestNightlyEpgWake:
         assert wake_env.calls.slept == []
 
     @pytest.mark.asyncio
-    async def test_failed_wake_is_not_slept(self, wake_env, monkeypatch):
+    async def test_failed_wake_still_switches_the_mains_back_off(self, wake_env, monkeypatch):
+        """The power-on command went out before the box failed to appear, so the
+        mains may be live with a receiver that never booted. Observed on
+        2026-08-16: wake timed out after 240 s and nothing switched it back."""
+        async def failing_wake(rcfg):
+            return False, "receiver did not come up within 240s"
+        monkeypatch.setattr(poller, "wake_for_epg", failing_wake)
+        self._flag(wake_env.env, epg_wake=True)
+        FAKE["online"] = False
+        await poller._nightly_full_sweep()
+        assert wake_env.calls.slept == ["box1"]
+        assert wake_env.calls.swept == 1
+
+    @pytest.mark.asyncio
+    async def test_failed_wake_is_not_toured(self, wake_env, monkeypatch):
         async def failing_wake(rcfg):
             return False, "gateway unreachable"
         monkeypatch.setattr(poller, "wake_for_epg", failing_wake)
         self._flag(wake_env.env, epg_wake=True)
         FAKE["online"] = False
         await poller._nightly_full_sweep()
-        assert wake_env.calls.slept == []
-        assert wake_env.calls.swept == 1
+        assert wake_env.calls.primed == []
 
     @pytest.mark.asyncio
     async def test_receiver_powered_down_even_if_sweep_raises(self, wake_env, monkeypatch):
