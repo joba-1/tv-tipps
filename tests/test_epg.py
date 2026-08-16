@@ -694,7 +694,7 @@ class TestTunedVerification:
         assert out["mistuned"] == 2
 
     @pytest.mark.asyncio
-    async def test_unreadable_current_service_counts_as_mistuned(self, db: Session):
+    async def test_unreadable_current_service_is_not_counted(self, db: Session):
         from tests.conftest import make_channel, make_receiver
         rcv = make_receiver(db)
         ch = make_channel(db, sref="1:0:19:1:AAA:1:C00000:0:0:0:", name="A")
@@ -705,4 +705,5 @@ class TestTunedVerification:
                 return None
 
         out = await prime_epg_cache(rcv, NoCurrent([7]), [ch], **_BOUNDS)
-        assert out["mistuned"] == 1
+        # Unreadable is not the same as wrong: the box simply would not say.
+        assert out["mistuned"] == 0

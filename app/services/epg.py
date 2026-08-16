@@ -464,14 +464,18 @@ async def prime_epg_cache(
         # reading leftovers from the previous service. Asking the box which
         # transponder it is on separates the two.
         tuned = await _tuned_transponder(client)
-        tuned_ok = tuned == key
-        if not tuned_ok:
+        # Three states, not two: in light standby /api/getcurrent frequently
+        # answers nothing at all (12 of 18 transponders on 2026-08-16, while
+        # those same transponders harvested as well as the rest). "Cannot tell"
+        # must not be reported as "wrong transponder".
+        tuned_ok = None if tuned is None else (tuned == key)
+        if tuned_ok is False:
             mistuned += 1
         log.info("epg.prime_transponder", receiver=receiver.name,
                  transponder=":".join(key) if key else None,
                  channel=rep.name, channels=len(group),
                  tuned_ok=tuned_ok,
-                 tuned_to=(":".join(tuned) if tuned and not tuned_ok else None),
+                 tuned_to=(":".join(tuned) if tuned else None),
                  **stats)
     total_sec = round(loop.time() - tour_start)
     log.info("epg.prime_done", receiver=receiver.name,
