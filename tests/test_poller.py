@@ -351,3 +351,110 @@ class TestNightlyEpgWake:
         await poller._nightly_full_sweep()
         assert wake_env.calls.primed == []
         assert wake_env.calls.swept == 1
+
+
+class TestOpportunisticHarvest:
+    """The cheap path: harvest while the box already sits in standby. No boot
+    means no HDMI-CEC pulse, so the TV stays off — which is the whole point."""
+
+    @pytest.fixture
+    def opp(self, env, monkeypatch):
+        calls = SimpleNamespace(primed=[], swept=0, woken=[])
+
+        async def fake_prime(rcfg):
+            calls.primed.append(rcfg.name)
+
+        async def fake_sweep(full=False):
+            calls.swept += 1
+
+        async def fake_wake(rcfg):
+            calls.woken.append(rcfg.name)
+            return True, None
+
+        monkeypatch.setattr(poller, "_prime_woken_receiver", fake_prime)
+        monkeypatch.setattr(poller, "_refresh_all_epg", fake_sweep)
+        monkeypatch.setattr(poller, "wake_for_epg", fake_wake)
+        poller._last_tour_at.clear()
+        FAKE.update({"power": "standby", "online": True, "recording": False})
+        rcv = env.db.query(models.Receiver).one()
+        rcv.epg_wake = True
+        rcv.power_method = "intertechno"
+        env.db.commit()
+        return SimpleNamespace(env=env, calls=calls)
+
+    @pytest.mark.asyncio
+    async def test_standby_box_is_harvested_without_waking_it(self, opp):
+        await poller._opportunistic_tour()
+        assert opp.calls.primed == ["box1"]
+        assert opp.calls.woken == []      # never powered anything
+
+    @pytest.mark.asyncio
+    async def test_powered_down_box_is_left_alone(self, opp):
+        FAKE["online"] = False
+        await poller._opportunistic_tour()
+        assert opp.calls.primed == []
+
+    @pytest.mark.asyncio
+    async def test_box_in_use_is_left_alone(self, opp):
+        FAKE["power"] = "on"
+        await poller._opportunistic_tour()
+        assert opp.calls.primed == []
+
+    @pytest.mark.asyncio
+    async def test_recording_box_is_left_alone(self, opp):
+        FAKE["recording"] = True
+        await poller._opportunistic_tour()
+        assert opp.calls.primed == []
+
+    @pytest.mark.asyncio
+    async def test_cooldown_prevents_a_second_harvest(self, opp):
+        await poller._opportunistic_tour()
+        await poller._opportunistic_tour()
+        assert opp.calls.primed == ["box1"]
+
+    @pytest.mark.asyncio
+    async def test_cooldown_expires(self, opp):
+        await poller._opportunistic_tour()
+        poller._last_tour_at["box1"] = utcnow() - timedelta(hours=99)
+        await poller._opportunistic_tour()
+        assert opp.calls.primed == ["box1", "box1"]
+
+
+class TestNightWakeGate:
+    """Waking the box at night boots it, and the boot switches the TV on. Only
+    worth it when the data has actually decayed."""
+
+    @pytest.fixture
+    def gate(self, env, monkeypatch):
+        calls = SimpleNamespace(woken=[], swept=0)
+
+        async def fake_wake_all():
+            calls.woken.append("wake")
+            return []
+
+        async def fake_sweep(full=False):
+            calls.swept += 1
+
+        monkeypatch.setattr(poller, "_wake_epg_receivers", fake_wake_all)
+        monkeypatch.setattr(poller, "_refresh_all_epg", fake_sweep)
+        return SimpleNamespace(calls=calls, monkeypatch=monkeypatch)
+
+    @pytest.mark.asyncio
+    async def test_fresh_epg_means_no_wake(self, gate):
+        gate.monkeypatch.setattr(poller, "_visible_horizon", lambda: 6.2)
+        await poller._nightly_full_sweep()
+        assert gate.calls.woken == []
+        assert gate.calls.swept == 1     # still sweeps whatever is reachable
+
+    @pytest.mark.asyncio
+    async def test_decayed_epg_earns_the_wake(self, gate):
+        gate.monkeypatch.setattr(poller, "_visible_horizon", lambda: 0.4)
+        await poller._nightly_full_sweep()
+        assert gate.calls.woken == ["wake"]
+
+    @pytest.mark.asyncio
+    async def test_unknown_horizon_falls_back_to_waking(self, gate):
+        """Cannot measure it — behave as before rather than silently stop."""
+        gate.monkeypatch.setattr(poller, "_visible_horizon", lambda: None)
+        await poller._nightly_full_sweep()
+        assert gate.calls.woken == ["wake"]

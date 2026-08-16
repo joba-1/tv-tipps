@@ -9,7 +9,9 @@ from app.database import SessionLocal
 from app.models import Receiver
 from app.enigma.client import EnigmaClient
 from app.services.channels import refresh_channels
-from app.services.epg import refresh_now_next, cleanup_old_events
+from app.services.epg import (
+    refresh_now_next, cleanup_old_events, visible_epg_horizon_days,
+)
 from app.services.power import wake_for_epg, shutdown_for_epg
 from app.logging_setup import get_logger
 from app.timezones import utcnow
@@ -19,6 +21,12 @@ log = get_logger(__name__)
 
 # In-memory state per receiver (keyed by receiver.name)
 _state: dict[str, dict[str, Any]] = {}
+# When each receiver was last zap-toured, so an opportunistic harvest does not
+# repeat every ten minutes. Lost on restart, which only permits one early tour.
+_last_tour_at: dict[str, datetime] = {}
+# The nightly job and the opportunistic one both retune the box; they must never
+# run at the same time.
+_tour_lock = asyncio.Lock()
 
 from zoneinfo import ZoneInfo as _ZoneInfo
 scheduler = AsyncIOScheduler(timezone=_ZoneInfo(settings.timezone))
@@ -330,10 +338,28 @@ async def _nightly_full_sweep() -> None:
     to receivers that answer HTTP, so the sweep just logged
     `epg.receiver_offline_skip` night after night and the cached EPG aged out.
     """
+    async with _tour_lock:
+        await _nightly_full_sweep_locked()
+
+
+async def _nightly_full_sweep_locked() -> None:
+    horizon = _visible_horizon()
+    if horizon is not None and horizon >= settings.epg_night_wake_below_days:
+        # Standby harvesting has kept the data current, so skip the one path
+        # that boots the box — booting pulses HDMI-CEC and the TV switches
+        # itself on, which at 03:30 is worse than a slightly shorter horizon.
+        log.info("epg.night_wake_skipped", horizon_days=horizon,
+                 threshold_days=settings.epg_night_wake_below_days)
+        await _refresh_all_epg(full=True)
+        return
+
+    log.info("epg.night_wake_needed", horizon_days=horizon,
+             threshold_days=settings.epg_night_wake_below_days)
     woken = await _wake_epg_receivers()
     try:
         for rcfg in woken:
             await _prime_woken_receiver(rcfg)
+            _last_tour_at[rcfg.name] = utcnow()
         await _refresh_all_epg(full=True)
     finally:
         # Always hand the boxes back the way we found them, even if the sweep
@@ -353,6 +379,56 @@ async def _nightly_full_sweep() -> None:
                 continue
             ok, reason = await shutdown_for_epg(rcfg)
             log.info("epg.wake_sleep_back", receiver=rcfg.name, ok=ok, reason=reason)
+
+
+def _visible_horizon() -> float | None:
+    db = SessionLocal()
+    try:
+        return visible_epg_horizon_days(db)
+    except Exception as e:
+        log.warning("epg.horizon_failed", error=str(e))
+        return None
+    finally:
+        db.close()
+
+
+async def _opportunistic_tour() -> None:
+    """Harvest EPG from a box that is already in light standby.
+
+    This is the cheap path and should carry the load: the box is powered and
+    reachable, zapping it costs the viewer nothing, and above all there is no
+    boot — so the TV stays off. Every successful harvest here pushes the
+    horizon back up and buys another night without the wake.
+    """
+    if _tour_lock.locked():
+        return
+    async with _tour_lock:
+        db = SessionLocal()
+        try:
+            from app.services.receivers import get_receiver_configs
+            candidates = [r for r in get_receiver_configs(db) if r.epg_wake]
+        finally:
+            db.close()
+
+        for rcfg in candidates:
+            last = _last_tour_at.get(rcfg.name)
+            if last and (utcnow() - last).total_seconds() < settings.epg_opportunistic_cooldown_h * 3600:
+                continue
+            client = EnigmaClient(rcfg.ip, mock=settings.mock_receivers)
+            if not await client.is_online():
+                continue          # powered down — nothing to harvest, and we
+                                  # will not wake it outside the nightly job
+            claim = await client.user_claim()
+            if claim:
+                log.debug("epg.opportunistic_busy", receiver=rcfg.name, claim=claim)
+                continue
+            log.info("epg.opportunistic_start", receiver=rcfg.name,
+                     horizon_days=_visible_horizon())
+            _last_tour_at[rcfg.name] = utcnow()
+            await _prime_woken_receiver(rcfg)
+            await _refresh_all_epg(full=True)
+            log.info("epg.opportunistic_done", receiver=rcfg.name,
+                     horizon_days=_visible_horizon())
 
 
 async def _wake_epg_receivers() -> list[ReceiverConfig]:
@@ -573,6 +649,14 @@ def start_scheduler() -> None:
         hour=settings.epg_full_refresh_hour,
         minute=30,
         id="refresh_epg_full",
+        max_instances=1,
+        coalesce=True,
+    )
+    scheduler.add_job(
+        _opportunistic_tour,
+        "interval",
+        minutes=settings.epg_opportunistic_check_min,
+        id="epg_opportunistic",
         max_instances=1,
         coalesce=True,
     )

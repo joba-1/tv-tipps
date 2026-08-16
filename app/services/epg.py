@@ -488,6 +488,34 @@ async def prime_epg_cache(
             "unvisited": unvisited, "aborted": aborted, "mistuned": mistuned}
 
 
+def visible_epg_horizon_days(db: Session) -> float | None:
+    """Median days of EPG ahead across the channels users can actually see.
+
+    The yardstick for whether the nightly wake is worth its cost: full after a
+    good harvest (~7 days here), decaying by a day per day without one. None
+    when there is nothing to measure."""
+    import statistics
+    from app.models import User
+    from app.services.channels import get_channels_for_user
+
+    channel_ids = set()
+    for user in db.query(User).all():
+        channel_ids |= {c.id for c in get_channels_for_user(user.id, db)}
+    if not channel_ids:
+        return None
+    now = utcnow()
+    rows = (
+        db.query(EpgEvent.channel_id, func.max(EpgEvent.start_time))
+        .filter(EpgEvent.channel_id.in_(channel_ids))
+        .group_by(EpgEvent.channel_id)
+        .all()
+    )
+    horizons = [(last - now).total_seconds() / 86400 for _, last in rows if last]
+    if not horizons:
+        return 0.0
+    return round(statistics.median(horizons), 1)
+
+
 def get_now_next(channel_ids: list[int], db: Session) -> list[dict]:
     """Return current + next event for each channel. channel_ids may be empty (→ all).
     Three set-based queries instead of two per channel."""

@@ -69,6 +69,17 @@ class Settings(BaseSettings):
     # box would stay powered for transponders × MAX. Whatever is not visited by
     # then is left to the next night rather than burning the user's electricity.
     epg_wake_tour_max_sec: int = 1800
+    # Harvesting while the box already sits in light standby costs nothing a
+    # viewer can notice: no boot, so no HDMI-CEC pulse and no TV switching
+    # itself on. Look for that opportunity this often, and do not repeat the
+    # tour more than once per cooldown.
+    epg_opportunistic_check_min: int = 10
+    epg_opportunistic_cooldown_h: int = 6
+    # The nightly wake is the expensive path — it boots the box, and the boot
+    # turns the TV on. Only take it when the data has actually decayed: below
+    # this median horizon across the channels users can see. Stale EPG is a
+    # mild annoyance; a TV waking the household at 03:30 is not.
+    epg_night_wake_below_days: float = 3.0
     # Viewing sessions older than this are pruned nightly. They stop feeding
     # the taste profile after 30 days anyway and only pin their EPG events
     # against cleanup; keep a generous window for the admin activity view.

@@ -92,6 +92,10 @@ _ATTEMPT_EVENTS = {
     "epg.wake_failed_powered_down": "mains switched back off",
     "epg.wake_skip_online": "skipped: receiver was already on",
     "epg.prime_aborted_user_active": "tour aborted: {claim} took the box",
+    "epg.night_wake_skipped": "night wake skipped: EPG still {horizon_days} days deep",
+    "epg.night_wake_needed": "night wake taken: EPG down to {horizon_days} days",
+    "epg.opportunistic_start": "standby harvest started",
+    "epg.opportunistic_done": "standby harvest finished ({horizon_days} days deep)",
 }
 
 
@@ -181,10 +185,16 @@ def outcome_report(runs: list[dict], events: list[dict], hours: int) -> str:
             detail = tmpl
         told.append(f"  {_local(d.get('timestamp'))}  {detail}")
 
+    by_design = any(d.get("event") == "epg.night_wake_skipped" for d in recent)
     skipped = any(d.get("event") == "epg.wake_skip_online" for d in recent)
-    headline = ("EPG wake run SKIPPED — the receiver was already on"
-                if skipped else
-                f"EPG wake run FAILED — no tour in the last {hours} h")
+    if by_design:
+        # Not a failure: standby harvesting kept the data current, so the box
+        # was deliberately left asleep rather than booted at 03:30.
+        headline = "EPG wake run NOT NEEDED — standby harvesting kept it current"
+    elif skipped:
+        headline = "EPG wake run SKIPPED — the receiver was already on"
+    else:
+        headline = f"EPG wake run FAILED — no tour in the last {hours} h"
 
     lines = [headline, ""]
     if latest:
@@ -201,12 +211,21 @@ def outcome_report(runs: list[dict], events: list[dict], hours: int) -> str:
         lines.append("Nothing in the journal — the scheduled job did not run at all."
                      " Check that the service was up at 03:30.")
     lines.append("")
+    notes = override_note(latest["cfg"] if latest else None)
+    if by_design:
+        if notes:
+            lines.append("Needs attention:")
+            lines += [f"  - {n}" for n in notes]
+        else:
+            lines.append("Nothing needs attention: the TV stayed off and the data is current.")
+        return "\n".join(lines)
+
     lines.append("Needs attention:")
     if skipped:
         lines.append("  - tour skipped by design; EPG only got what the box already had")
     else:
         lines.append("  - no EPG collected tonight; the data above ages by one more day")
-    lines += [f"  - {n}" for n in override_note(latest["cfg"] if latest else None)]
+    lines += [f"  - {n}" for n in notes]
     return "\n".join(lines)
 
 
