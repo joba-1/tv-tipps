@@ -225,6 +225,9 @@ class TestNightlyEpgWake:
         monkeypatch.setattr(poller, "shutdown_for_epg", fake_sleep)
         monkeypatch.setattr(poller, "_refresh_all_epg", fake_sweep)
         monkeypatch.setattr(poller, "_prime_woken_receiver", fake_prime)
+        # A receiver we woke for EPG sits in light standby; "on" is the signal
+        # that a person switched it on and it is no longer ours to power off.
+        FAKE["power"] = "standby"
         return SimpleNamespace(env=env, calls=calls)
 
     def _flag(self, env, *, epg_wake: bool) -> None:
@@ -295,6 +298,21 @@ class TestNightlyEpgWake:
         with pytest.raises(RuntimeError):
             await poller._nightly_full_sweep()
         assert wake_env.calls.slept == ["box1"]
+
+    @pytest.mark.asyncio
+    async def test_box_switched_on_mid_sweep_is_left_powered(self, wake_env, monkeypatch):
+        """These boxes are used for live TV now: whoever switches one on during
+        the sweep owns it, and cutting its mains would black out their TV."""
+        self._flag(wake_env.env, epg_wake=True)
+        FAKE["online"] = False
+
+        async def sweep_then_user_turns_it_on(full=False):
+            wake_env.calls.swept += 1
+            FAKE["power"] = "on"   # someone picked up the remote
+
+        monkeypatch.setattr(poller, "_refresh_all_epg", sweep_then_user_turns_it_on)
+        await poller._nightly_full_sweep()
+        assert wake_env.calls.slept == []   # mains left alone
 
     @pytest.mark.asyncio
     async def test_woken_receiver_is_zap_toured_before_the_sweep(self, wake_env):

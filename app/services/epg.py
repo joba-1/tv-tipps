@@ -403,7 +403,10 @@ async def prime_epg_cache(
 
     Zapping works in light standby and does not bring the box out of it, so the
     HDMI output stays dark for the whole tour. Only ever call this for a box we
-    powered up ourselves — never zap a receiver someone is watching.
+    powered up ourselves — never zap a receiver someone is watching. The tour
+    also gives up the moment the box leaves standby: these receivers are used
+    for live TV, so someone switching one on mid-tour must not find their
+    channel hopping around.
     """
     import asyncio
 
@@ -417,9 +420,16 @@ async def prime_epg_cache(
     saturated_times: list[int] = []
     hit_ceiling = 0
     unvisited = 0
+    aborted = False
     for group in groups:
         rep = group[0]
         key = transponder_key(rep.sref)
+        if await client.get_power_state() == "on":
+            aborted = True
+            unvisited = len(groups) - visited
+            log.warning("epg.prime_aborted_user_active", receiver=receiver.name,
+                        visited=visited, unvisited=unvisited)
+            break
         if loop.time() - tour_start >= tour_max_sec:
             # Out of budget: the rest keeps its stale data for one more night,
             # which beats keeping the box powered indefinitely.
@@ -445,11 +455,11 @@ async def prime_epg_cache(
     total_sec = round(loop.time() - tour_start)
     log.info("epg.prime_done", receiver=receiver.name,
              visited=visited, transponders=len(groups), total_sec=total_sec,
-             hit_ceiling=hit_ceiling, unvisited=unvisited,
+             hit_ceiling=hit_ceiling, unvisited=unvisited, aborted=aborted,
              slowest_saturation_sec=max(saturated_times, default=None))
     return {"transponders": len(groups), "visited": visited,
             "total_sec": total_sec, "hit_ceiling": hit_ceiling,
-            "unvisited": unvisited}
+            "unvisited": unvisited, "aborted": aborted}
 
 
 def get_now_next(channel_ids: list[int], db: Session) -> list[dict]:

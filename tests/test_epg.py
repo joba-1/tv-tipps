@@ -465,10 +465,15 @@ class FakeTourClient:
     """Zaps always succeed; each epgservice call returns `next(counts)` events
     for the channel, so a test scripts how the box's cache fills over time."""
 
-    def __init__(self, counts_per_sample):
+    def __init__(self, counts_per_sample, power="standby"):
         self.counts = list(counts_per_sample)
         self.zapped: list[str] = []
         self.samples = 0
+        # A box we woke sits in light standby; "on" means a person took it over.
+        self.power = power
+
+    async def get_power_state(self):
+        return self.power
 
     async def zap(self, sref):
         self.zapped.append(sref)
@@ -585,3 +590,46 @@ class TestDwellUntilSaturated:
         assert out["events"] == 0
         assert out["reason"] == "saturated"
         assert out["saturated_after_sec"] is None
+
+
+class TestTourStopsForTheUser:
+    """The receivers are used for live TV, so a tour must not keep retuning a box
+    someone has just switched on — nor may the caller then cut its mains."""
+
+    @pytest.mark.asyncio
+    async def test_tour_aborts_when_the_box_leaves_standby(self, db: Session):
+        from tests.conftest import make_channel, make_receiver
+        rcv = make_receiver(db)
+        chans = [
+            make_channel(db, sref="1:0:19:1:AAA:1:C00000:0:0:0:", name="A"),
+            make_channel(db, sref="1:0:19:2:BBB:1:C00000:0:0:0:", name="B"),
+            make_channel(db, sref="1:0:19:3:CCC:1:C00000:0:0:0:", name="C"),
+        ]
+        db.commit()
+
+        class UserWakesItUp(FakeTourClient):
+            async def zap(self, sref):
+                out = await super().zap(sref)
+                if len(self.zapped) == 1:
+                    self.power = "on"   # remote pressed after the first hop
+                return out
+
+        client = UserWakesItUp([5])
+        out = await prime_epg_cache(rcv, client, chans, **_BOUNDS)
+        assert out["aborted"] is True
+        assert out["visited"] == 1
+        assert out["unvisited"] == 2
+        assert len(client.zapped) == 1   # no further retuning
+
+    @pytest.mark.asyncio
+    async def test_tour_runs_to_the_end_while_the_box_stays_in_standby(self, db: Session):
+        from tests.conftest import make_channel, make_receiver
+        rcv = make_receiver(db)
+        chans = [
+            make_channel(db, sref="1:0:19:1:AAA:1:C00000:0:0:0:", name="A"),
+            make_channel(db, sref="1:0:19:2:BBB:1:C00000:0:0:0:", name="B"),
+        ]
+        db.commit()
+        out = await prime_epg_cache(rcv, FakeTourClient([5]), chans, **_BOUNDS)
+        assert out["aborted"] is False
+        assert out["visited"] == 2

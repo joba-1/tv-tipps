@@ -338,8 +338,15 @@ async def _nightly_full_sweep() -> None:
     finally:
         # Always hand the boxes back the way we found them, even if the sweep
         # raised — leaving a receiver powered up is the one outcome the user
-        # would notice.
+        # would notice. The exception is a box that has meanwhile left standby:
+        # these receivers are used for live TV now, so someone switching one on
+        # during the sweep owns it, and cutting its mains would black out
+        # whatever they are watching.
         for rcfg in woken:
+            client = EnigmaClient(rcfg.ip, mock=settings.mock_receivers)
+            if await client.get_power_state() == "on":
+                log.info("epg.wake_left_on_user_active", receiver=rcfg.name)
+                continue
             ok, reason = await shutdown_for_epg(rcfg)
             log.info("epg.wake_sleep_back", receiver=rcfg.name, ok=ok, reason=reason)
 
