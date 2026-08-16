@@ -549,6 +549,35 @@ def epg_coverage(db: Session, hours: int | None = None) -> tuple[float | None, i
     return round(covered / len(ids), 2), covered, len(ids)
 
 
+def days_until_forced_scan(db: Session, max_days: int = 30) -> int | None:
+    """How many days of decay before the nightly wake becomes unavoidable.
+
+    Coverage only falls as events age out, so we can say today when the box will
+    have to be booted — and the boot is what switches the TV on. 0 means the
+    threshold is already breached and the next nightly run will scan; 1 means
+    tomorrow night. None when coverage cannot be measured at all.
+    """
+    ids = important_channel_ids(db)
+    if not ids:
+        return None
+    now = utcnow()
+    rows = (
+        db.query(func.max(EpgEvent.start_time))
+        .filter(EpgEvent.channel_id.in_(ids))
+        .group_by(EpgEvent.channel_id)
+        .all()
+    )
+    # Channels with no EPG at all count as uncovered from day zero.
+    ends = [last for (last,) in rows if last]
+    uncovered_always = len(ids) - len(ends)
+    for day in range(max_days + 1):
+        deadline = now + timedelta(days=day, hours=settings.epg_coverage_hours)
+        covered = sum(1 for last in ends if last >= deadline)
+        if (covered / len(ids)) < settings.epg_night_wake_below_coverage:
+            return day
+    return None if uncovered_always else max_days
+
+
 def visible_epg_horizon_days(db: Session) -> float | None:
     """Median days of EPG ahead across the channels users can actually see.
 

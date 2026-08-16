@@ -74,6 +74,11 @@ class AdminStatus(BaseModel):
     db_channel_count: int
     db_epg_event_count: int
     version: str = "?"
+    # EPG decay, i.e. how close we are to a forced night wake (which boots the
+    # box and switches the TV on).
+    epg_coverage: float | None = None
+    epg_important_channels: int = 0
+    epg_days_until_forced_scan: int | None = None
 
 
 class RecommendationItem(BaseModel):

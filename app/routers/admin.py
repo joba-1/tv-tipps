@@ -363,11 +363,16 @@ async def admin_status(db: Session = Depends(get_db)):
         ))
     db.commit()
 
+    from app.services.epg import epg_coverage, days_until_forced_scan
+    coverage, _covered, important = epg_coverage(db)
     return AdminStatus(
         receivers=receiver_statuses,
         db_channel_count=db.query(Channel).count(),
         db_epg_event_count=db.query(EpgEvent).count(),
         version=_VERSION,
+        epg_coverage=coverage,
+        epg_important_channels=important,
+        epg_days_until_forced_scan=days_until_forced_scan(db),
     )
 
 

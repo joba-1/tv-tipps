@@ -23,6 +23,7 @@ from datetime import datetime
 UNIT = "tv-tipps"
 DB_PATH = "/var/lib/tv-tipps/tv_tipps.db"
 ENV_PATH = "/etc/tv-tipps/env"
+STATUS_URL = "http://localhost:8844/api/admin/status"
 # The committed defaults (config.py). A run using anything else is running under
 # a hand-set override — fine for a diagnostic night, easy to forget afterwards,
 # and expensive: a widened dwell keeps the box powered far longer every night.
@@ -139,6 +140,37 @@ def epg_freshness() -> list[str]:
     ]
 
 
+def forced_scan_status() -> tuple[list[str], list[str]]:
+    """How long until EPG decay forces a night wake — and the wake boots the
+    box, which switches the TV on. Returns (report lines, alerts).
+
+    Green while there is room, yellow when it lands on the coming night, red
+    once the threshold is already breached."""
+    import urllib.request
+    try:
+        with urllib.request.urlopen(STATUS_URL, timeout=10) as r:
+            d = json.load(r)
+    except Exception as e:
+        return [f"  forced night scan    : unknown ({e})"], []
+
+    days = d.get("epg_days_until_forced_scan")
+    cov = d.get("epg_coverage")
+    n = d.get("epg_important_channels", 0)
+    detail = f"coverage {cov} over {n} watched channels" if cov is not None else "coverage unmeasurable"
+
+    if days is None:
+        return [f"  forced night scan    : not foreseeable ({detail})"], []
+    if days == 0:
+        return ([f"  forced night scan    : \U0001F534 OVERDUE — tonight's run will boot"
+                 f" the box and the TV will come on ({detail})"],
+                ["EPG has decayed past the threshold: the next nightly run wakes the box"])
+    if days == 1:
+        return ([f"  forced night scan    : \U0001F7E1 NEXT NIGHT — the TV will come on"
+                 f" unless the box is in standby before then ({detail})"],
+                ["forced night scan due next night; a standby harvest today would avoid it"])
+    return [f"  forced night scan    : \U0001F7E2 in {days} days ({detail})"], []
+
+
 def override_note(cfg: dict | None) -> list[str]:
     """Warn while temporary dwell overrides are still in place.
 
@@ -203,6 +235,8 @@ def outcome_report(runs: list[dict], events: list[dict], hours: int) -> str:
     else:
         lines.append("  last successful tour: none in the journal window")
     lines += epg_freshness()
+    scan_lines, scan_alerts = forced_scan_status()
+    lines += scan_lines
     lines.append("")
     if told:
         lines.append("What the box did instead:")
@@ -211,7 +245,7 @@ def outcome_report(runs: list[dict], events: list[dict], hours: int) -> str:
         lines.append("Nothing in the journal — the scheduled job did not run at all."
                      " Check that the service was up at 03:30.")
     lines.append("")
-    notes = override_note(latest["cfg"] if latest else None)
+    notes = override_note(latest["cfg"] if latest else None) + scan_alerts
     if by_design:
         if notes:
             lines.append("Needs attention:")
@@ -273,6 +307,8 @@ def report(runs: list[dict], events: list[dict], hours: int = 24) -> str:
         lines.append(f"  now/next events      : {latest['now_next'].get('events')}")
     if latest["sweep"]:
         lines.append(f"  sweep skipped        : {latest['sweep'].get('skipped')} channels")
+    scan_lines, scan_alerts = forced_scan_status()
+    lines += scan_lines
 
     # Per-transponder history, so a drop stands out against its own baseline.
     past: dict[str, list[int]] = {}
@@ -308,6 +344,7 @@ def report(runs: list[dict], events: list[dict], hours: int = 24) -> str:
     lines.append("")
     lines.append(f"  exited at the {floor}s floor: {len(at_floor)}/{len(latest['tps'])}")
 
+    alerts += scan_alerts
     alerts += override_note(cfg)
     if latest["wake_failed"]:
         alerts.append(f"wake failed: {[w.get('reason') for w in latest['wake_failed']]}")
