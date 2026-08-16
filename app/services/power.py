@@ -143,6 +143,15 @@ _WAKE_POLL_INTERVAL_SEC = 1.0
 # the sweep skipped it — while a second later it answered /api/about in 42 ms).
 # Wait for it to answer again before declaring the box ready for the sweep.
 _WAKE_SETTLE_TIMEOUT_SEC = 60
+# Switching an Intertechno box on is fire-and-forget 433 MHz: the gateway
+# answers 302 whether or not the socket heard anything, and a lost command costs
+# the whole night (2 of 8 nights in Aug 2026 — once the gateway was unreachable,
+# once the box never even answered ping). So resend the on-command once if the
+# box has not appeared, and retry the command itself if the gateway refused it.
+# Both commands are absolute "on", not a toggle, so a resend to a box that is
+# already booting is harmless.
+_WAKE_RETRY_AFTER_SEC = 90
+_SWITCH_RETRY_DELAY_SEC = 5
 
 
 async def _await_reachable(client, timeout_sec: float) -> bool:
@@ -179,12 +188,27 @@ async def wake_for_epg(rcfg: ReceiverConfig) -> PowerResult:
 
     ok, reason = await wake_receiver(rcfg)
     if not ok:
-        return False, reason
+        # The gateway itself refused the command — give it one more go before
+        # writing off the night.
+        log.info("power.switch_retry", receiver=rcfg.name, reason=reason)
+        await asyncio.sleep(_SWITCH_RETRY_DELAY_SEC)
+        ok, reason = await wake_receiver(rcfg)
+        if not ok:
+            return False, reason
 
     client = EnigmaClient(rcfg.ip, mock=settings.mock_receivers)
     loop = asyncio.get_running_loop()
     deadline = loop.time() + _WAKE_BOOT_TIMEOUT_SEC
+    resent = False
     while loop.time() < deadline:
+        elapsed = _WAKE_BOOT_TIMEOUT_SEC - (deadline - loop.time())
+        if not resent and elapsed >= _WAKE_RETRY_AFTER_SEC:
+            # Nothing yet, and the box normally answers in ~71 s: assume the RF
+            # command never reached the socket and send it again.
+            resent = True
+            resend_ok, resend_reason = await wake_receiver(rcfg)
+            log.info("power.wake_resent", receiver=rcfg.name,
+                     after_sec=round(elapsed), ok=resend_ok, reason=resend_reason)
         if await client.is_online():
             boot_sec = round(_WAKE_BOOT_TIMEOUT_SEC - (deadline - loop.time()))
             standby_ok, standby_reason = await openwebif_standby(rcfg)

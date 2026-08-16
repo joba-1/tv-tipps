@@ -48,8 +48,9 @@ def spy(monkeypatch):
     monkeypatch.setattr(power, "wake_receiver", fake_wake)
     monkeypatch.setattr(power, "openwebif_standby", fake_standby)
     monkeypatch.setattr(enigma_client, "EnigmaClient", FakeClient)
-    # No real waiting between probes.
+    # No real waiting between probes or before the switch retry.
     monkeypatch.setattr(power, "_WAKE_POLL_INTERVAL_SEC", 0)
+    monkeypatch.setattr(power, "_SWITCH_RETRY_DELAY_SEC", 0)
     return {"calls": calls, "state": state}
 
 
@@ -95,12 +96,48 @@ class TestWakeForEpg:
 
     @pytest.mark.asyncio
     async def test_no_probing_when_the_switch_fails(self, spy, monkeypatch):
+        attempts = {"n": 0}
+
         async def failing_wake(rcfg):
+            attempts["n"] += 1
             return False, "gateway unreachable"
         monkeypatch.setattr(power, "wake_receiver", failing_wake)
         ok, reason = await power.wake_for_epg(_rcfg())
         assert (ok, reason) == (False, "gateway unreachable")
+        assert attempts["n"] == 2   # the gateway got a second chance
         assert spy["calls"]["probes"] == 0
+
+    @pytest.mark.asyncio
+    async def test_switch_retry_rescues_a_refused_command(self, spy, monkeypatch):
+        """2026-08-11 lost a whole night to a gateway that refused once."""
+        attempts = {"n": 0}
+
+        async def flaky_wake(rcfg):
+            attempts["n"] += 1
+            return (False, "gateway unreachable") if attempts["n"] == 1 else (True, None)
+        monkeypatch.setattr(power, "wake_receiver", flaky_wake)
+        ok, reason = await power.wake_for_epg(_rcfg())
+        assert (ok, reason) == (True, None)
+        assert attempts["n"] == 2
+
+    @pytest.mark.asyncio
+    async def test_on_command_is_resent_when_the_box_never_appears(self, spy, monkeypatch):
+        """433 MHz is fire-and-forget and the gateway answers 302 either way, so
+        a lost command looks exactly like a slow boot (2026-08-16: the box did
+        not even answer ping). Resend once rather than lose the night."""
+        spy["state"]["boots_after"] = 10**9
+        monkeypatch.setattr(power, "_WAKE_BOOT_TIMEOUT_SEC", 0.2)
+        monkeypatch.setattr(power, "_WAKE_RETRY_AFTER_SEC", 0.05)
+        ok, _ = await power.wake_for_epg(_rcfg())
+        assert ok is False
+        assert spy["calls"]["wake"] == 2   # initial command + one resend
+
+    @pytest.mark.asyncio
+    async def test_no_resend_when_the_box_comes_up_promptly(self, spy, monkeypatch):
+        monkeypatch.setattr(power, "_WAKE_RETRY_AFTER_SEC", 90)
+        ok, _ = await power.wake_for_epg(_rcfg())
+        assert ok is True
+        assert spy["calls"]["wake"] == 1
 
 
 class TestShutdownForEpg:
