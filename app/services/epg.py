@@ -318,6 +318,13 @@ async def _count_cached_events(client: EnigmaClient, group: list[Channel]) -> in
     return total
 
 
+async def _tuned_transponder(client: EnigmaClient) -> tuple[str, str, str] | None:
+    """Which transponder the tuner actually sits on, per the box itself."""
+    raw = await client.get_current()
+    ref = ((raw or {}).get("info") or {}).get("ref") or ""
+    return transponder_key(ref)
+
+
 async def _dwell_until_saturated(
     client: EnigmaClient, group: list[Channel], *,
     min_sec: float, max_sec: float, flat_sec: float, sample_sec: float,
@@ -420,6 +427,7 @@ async def prime_epg_cache(
     saturated_times: list[int] = []
     hit_ceiling = 0
     unvisited = 0
+    mistuned = 0
     aborted = False
     for group in groups:
         rep = group[0]
@@ -450,17 +458,30 @@ async def prime_epg_cache(
             hit_ceiling += 1
         if stats["saturated_after_sec"] is not None:
             saturated_times.append(stats["saturated_after_sec"])
+        # Did the zap actually retune? /api/zap answers result=true whether or
+        # not the tuner moved, and a transponder that is flat from its very
+        # first sample looks exactly like one we never tuned to — we would be
+        # reading leftovers from the previous service. Asking the box which
+        # transponder it is on separates the two.
+        tuned = await _tuned_transponder(client)
+        tuned_ok = tuned == key
+        if not tuned_ok:
+            mistuned += 1
         log.info("epg.prime_transponder", receiver=receiver.name,
                  transponder=":".join(key) if key else None,
-                 channel=rep.name, channels=len(group), **stats)
+                 channel=rep.name, channels=len(group),
+                 tuned_ok=tuned_ok,
+                 tuned_to=(":".join(tuned) if tuned and not tuned_ok else None),
+                 **stats)
     total_sec = round(loop.time() - tour_start)
     log.info("epg.prime_done", receiver=receiver.name,
              visited=visited, transponders=len(groups), total_sec=total_sec,
              hit_ceiling=hit_ceiling, unvisited=unvisited, aborted=aborted,
+             mistuned=mistuned,
              slowest_saturation_sec=max(saturated_times, default=None))
     return {"transponders": len(groups), "visited": visited,
             "total_sec": total_sec, "hit_ceiling": hit_ceiling,
-            "unvisited": unvisited, "aborted": aborted}
+            "unvisited": unvisited, "aborted": aborted, "mistuned": mistuned}
 
 
 def get_now_next(channel_ids: list[int], db: Session) -> list[dict]:

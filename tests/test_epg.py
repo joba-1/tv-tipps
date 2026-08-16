@@ -472,9 +472,16 @@ class FakeTourClient:
         # A box we woke sits in light standby; "on" means a person took it over.
         self.power = power
         self.recording = False
+        self.stuck_on: str | None = None
 
     async def get_power_state(self):
         return self.power
+
+    async def get_current(self):
+        """By default the tuner followed the zap; set `stuck_on` to simulate a
+        zap the box acknowledged but never acted on."""
+        ref = self.stuck_on or (self.zapped[-1] if self.zapped else "")
+        return {"info": {"ref": ref}}
 
     async def user_claim(self):
         if self.power == "on":
@@ -656,3 +663,46 @@ class TestTourStopsForTheUser:
         out = await prime_epg_cache(rcv, client, chans, **_BOUNDS)
         assert out["aborted"] is True
         assert client.zapped == []
+
+
+class TestTunedVerification:
+    """/api/zap answers result=true whether or not the tuner moved. A transponder
+    flat from its first sample looks identical to one we never tuned to, so ask
+    the box where it actually is."""
+
+    @pytest.mark.asyncio
+    async def test_successful_zap_counts_as_tuned(self, db: Session):
+        from tests.conftest import make_channel, make_receiver
+        rcv = make_receiver(db)
+        ch = make_channel(db, sref="1:0:19:1:AAA:1:C00000:0:0:0:", name="A")
+        db.commit()
+        out = await prime_epg_cache(rcv, FakeTourClient([7]), [ch], **_BOUNDS)
+        assert out["mistuned"] == 0
+
+    @pytest.mark.asyncio
+    async def test_tuner_stuck_on_another_transponder_is_counted(self, db: Session):
+        from tests.conftest import make_channel, make_receiver
+        rcv = make_receiver(db)
+        chans = [
+            make_channel(db, sref="1:0:19:1:AAA:1:C00000:0:0:0:", name="A"),
+            make_channel(db, sref="1:0:19:2:BBB:1:C00000:0:0:0:", name="B"),
+        ]
+        db.commit()
+        client = FakeTourClient([7])
+        client.stuck_on = "1:0:19:9:ZZZ:1:C00000:0:0:0:"   # never moved
+        out = await prime_epg_cache(rcv, client, chans, **_BOUNDS)
+        assert out["mistuned"] == 2
+
+    @pytest.mark.asyncio
+    async def test_unreadable_current_service_counts_as_mistuned(self, db: Session):
+        from tests.conftest import make_channel, make_receiver
+        rcv = make_receiver(db)
+        ch = make_channel(db, sref="1:0:19:1:AAA:1:C00000:0:0:0:", name="A")
+        db.commit()
+
+        class NoCurrent(FakeTourClient):
+            async def get_current(self):
+                return None
+
+        out = await prime_epg_cache(rcv, NoCurrent([7]), [ch], **_BOUNDS)
+        assert out["mistuned"] == 1
