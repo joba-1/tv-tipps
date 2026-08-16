@@ -22,6 +22,11 @@ from datetime import datetime
 
 UNIT = "tv-tipps"
 DB_PATH = "/var/lib/tv-tipps/tv_tipps.db"
+ENV_PATH = "/etc/tv-tipps/env"
+# The committed defaults (config.py). A run using anything else is running under
+# a hand-set override — fine for a diagnostic night, easy to forget afterwards,
+# and expensive: a widened dwell keeps the box powered far longer every night.
+_DEFAULT_BOUNDS = {"min_sec": 25, "flat_sec": 10, "max_sec": 120}
 # Below this fraction of a transponder's historical median we call it a drop
 # worth reporting rather than normal night-to-night variation.
 DROP_RATIO = 0.5
@@ -130,6 +135,33 @@ def epg_freshness() -> list[str]:
     ]
 
 
+def override_note(cfg: dict | None) -> list[str]:
+    """Warn while temporary dwell overrides are still in place.
+
+    The reminder rides in the report itself rather than in a separate job: it
+    appears every morning the overrides are set and disappears by itself the
+    morning after they are removed."""
+    active = {}
+    if cfg:
+        for key, default in _DEFAULT_BOUNDS.items():
+            got = cfg.get(key)
+            if got is not None and got != default:
+                active[key] = (got, default)
+    if not active:
+        # No tour last night — fall back to the env file if it is readable.
+        try:
+            with open(ENV_PATH) as fh:
+                if any(l.startswith("EPG_WAKE_") for l in fh):
+                    return [f"diagnostic EPG_WAKE_* overrides still set in {ENV_PATH}"
+                            " — remove them and restart tv-tipps"]
+        except OSError:
+            pass
+        return []
+    detail = ", ".join(f"{k}={got}s (default {dflt}s)" for k, (got, dflt) in active.items())
+    return [f"diagnostic dwell overrides still active: {detail}"
+            f" — remove them from {ENV_PATH} and restart tv-tipps"]
+
+
 def outcome_report(runs: list[dict], events: list[dict], hours: int) -> str:
     """What to send when no tour ran. Repeating yesterday's transponder table
     would bury the one thing worth knowing: the EPG did not get refreshed."""
@@ -174,6 +206,7 @@ def outcome_report(runs: list[dict], events: list[dict], hours: int) -> str:
         lines.append("  - tour skipped by design; EPG only got what the box already had")
     else:
         lines.append("  - no EPG collected tonight; the data above ages by one more day")
+    lines += [f"  - {n}" for n in override_note(latest["cfg"] if latest else None)]
     return "\n".join(lines)
 
 
@@ -256,6 +289,7 @@ def report(runs: list[dict], events: list[dict], hours: int = 24) -> str:
     lines.append("")
     lines.append(f"  exited at the {floor}s floor: {len(at_floor)}/{len(latest['tps'])}")
 
+    alerts += override_note(cfg)
     if latest["wake_failed"]:
         alerts.append(f"wake failed: {[w.get('reason') for w in latest['wake_failed']]}")
     if latest["left_on"]:
