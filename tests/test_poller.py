@@ -462,9 +462,12 @@ class TestNightWakeGate:
 
     @pytest.mark.asyncio
     async def test_shallow_broadcasters_do_not_force_a_wake(self, gate):
-        """The point of coverage over horizon: stations that only ever transmit
-        two days must not drag the decision down while they are current."""
-        gate.monkeypatch.setattr(poller, "_coverage", lambda: (0.75, 24, 33))
+        """The point of coverage over horizon: a median dragged down by stations
+        that only ever transmit two days must not book the box a 03:30 boot
+        while everything important is still covered. Coverage is set well clear
+        of the threshold on purpose — this test is about horizon being ignored,
+        not about where the threshold sits."""
+        gate.monkeypatch.setattr(poller, "_coverage", lambda: (1.0, 33, 33))
         gate.monkeypatch.setattr(poller, "_visible_horizon", lambda: 1.9)
         await poller._nightly_full_sweep()
         assert gate.calls.woken == []
