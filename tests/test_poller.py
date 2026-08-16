@@ -359,10 +359,11 @@ class TestOpportunisticHarvest:
 
     @pytest.fixture
     def opp(self, env, monkeypatch):
-        calls = SimpleNamespace(primed=[], swept=0, woken=[])
+        calls = SimpleNamespace(primed=[], swept=0, woken=[], abort_tour=False)
 
         async def fake_prime(rcfg):
             calls.primed.append(rcfg.name)
+            return {"aborted": calls.abort_tour, "visited": 1}
 
         async def fake_sweep(full=False):
             calls.swept += 1
@@ -411,6 +412,16 @@ class TestOpportunisticHarvest:
         await poller._opportunistic_tour()
         await poller._opportunistic_tour()
         assert opp.calls.primed == ["box1"]
+
+    @pytest.mark.asyncio
+    async def test_aborted_tour_does_not_earn_the_cooldown(self, opp):
+        """Cut short by a viewer means a fraction of the transponders were
+        harvested. Blocking the retry for six hours over that would push the box
+        towards a forced night wake for nothing."""
+        opp.calls.abort_tour = True
+        await poller._opportunistic_tour()
+        await poller._opportunistic_tour()
+        assert opp.calls.primed == ["box1", "box1"]
 
     @pytest.mark.asyncio
     async def test_cooldown_expires(self, opp):

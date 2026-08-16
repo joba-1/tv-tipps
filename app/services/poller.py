@@ -439,10 +439,18 @@ async def _opportunistic_tour() -> None:
                 continue
             log.info("epg.opportunistic_start", receiver=rcfg.name,
                      horizon_days=_visible_horizon())
-            _last_tour_at[rcfg.name] = utcnow()
-            await _prime_woken_receiver(rcfg)
+            stats = await _prime_woken_receiver(rcfg)
             await _refresh_all_epg(full=True)
+            # Only a tour that ran to the end earns the cooldown. One cut short
+            # because someone switched the box on harvested a fraction of the
+            # transponders, and blocking the retry for six hours over that would
+            # push the box towards a forced night wake for no reason. Retrying
+            # costs nothing: the next tick skips it while it is still in use.
+            if stats and not stats.get("aborted"):
+                _last_tour_at[rcfg.name] = utcnow()
             log.info("epg.opportunistic_done", receiver=rcfg.name,
+                     aborted=bool(stats and stats.get("aborted")),
+                     visited=(stats or {}).get("visited"),
                      horizon_days=_visible_horizon())
 
 
@@ -478,7 +486,7 @@ async def _wake_epg_receivers() -> list[ReceiverConfig]:
     return woken
 
 
-async def _prime_woken_receiver(rcfg: ReceiverConfig) -> None:
+async def _prime_woken_receiver(rcfg: ReceiverConfig) -> dict | None:
     """Zap-tour the transponders of the channels users actually see, so the box
     has EPG for more than the one transponder it booted on.
 
@@ -501,7 +509,7 @@ async def _prime_woken_receiver(rcfg: ReceiverConfig) -> None:
                 visible[ch.id] = ch
         if not visible:
             log.info("epg.prime_skip", receiver=rcfg.name, reason="no visible channels")
-            return
+            return None
         client = EnigmaClient(rcfg.ip, mock=settings.mock_receivers)
         await prime_epg_cache(
             receiver, client, list(visible.values()),
@@ -515,6 +523,7 @@ async def _prime_woken_receiver(rcfg: ReceiverConfig) -> None:
         # A failed tour costs us data, not correctness — the sweep still runs on
         # whatever the box already had.
         log.warning("epg.prime_failed", receiver=rcfg.name, error=str(e))
+        return None
     finally:
         db.close()
 
