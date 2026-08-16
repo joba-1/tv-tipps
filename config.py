@@ -89,7 +89,10 @@ class Settings(BaseSettings):
     # each still reach far enough ahead to be useful? A 2-day broadcaster passes
     # while it is current and fails only once it has genuinely run dry.
     epg_coverage_hours: int = 36
-    epg_night_wake_below_coverage: float = 0.7
+    # 0.85 puts the wake at roughly day 4 of no harvesting at all (measured
+    # 2026-08-16 against the real decay curve: day 2 → 0.91, day 4 → 0.85,
+    # day 5 → 0.76). 0.7 would have waited until day 6.
+    epg_night_wake_below_coverage: float = 0.85
     # Which channels count. Empty = derive from what the household actually
     # watches (confirmed viewing sessions in this window); set a comma-separated
     # list of channel names to pin it by hand instead.
