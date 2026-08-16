@@ -350,9 +350,6 @@ def report(runs: list[dict], events: list[dict], hours: int = 24) -> str:
         alerts.append(f"wake failed: {[w.get('reason') for w in latest['wake_failed']]}")
     if latest["left_on"]:
         alerts.append("RECEIVER MAY STILL BE POWERED ON — sleep_receiver reported failure")
-    if done.get("mistuned"):
-        alerts.append(f"{done['mistuned']} transponder(s) never actually tuned — "
-                      "the zap was acknowledged but the tuner did not move")
     if done.get("aborted"):
         alerts.append(f"tour aborted after {done.get('visited')} transponders — "
                       "someone took the box over")

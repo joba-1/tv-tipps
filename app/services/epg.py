@@ -319,13 +319,6 @@ async def _count_cached_events(client: EnigmaClient, group: list[Channel]) -> in
     return total
 
 
-async def _tuned_transponder(client: EnigmaClient) -> tuple[str, str, str] | None:
-    """Which transponder the tuner actually sits on, per the box itself."""
-    raw = await client.get_current()
-    ref = ((raw or {}).get("info") or {}).get("ref") or ""
-    return transponder_key(ref)
-
-
 async def _dwell_until_saturated(
     client: EnigmaClient, group: list[Channel], *,
     min_sec: float, max_sec: float, flat_sec: float, sample_sec: float,
@@ -428,7 +421,6 @@ async def prime_epg_cache(
     saturated_times: list[int] = []
     hit_ceiling = 0
     unvisited = 0
-    mistuned = 0
     aborted = False
     for group in groups:
         rep = group[0]
@@ -459,34 +451,17 @@ async def prime_epg_cache(
             hit_ceiling += 1
         if stats["saturated_after_sec"] is not None:
             saturated_times.append(stats["saturated_after_sec"])
-        # Did the zap actually retune? /api/zap answers result=true whether or
-        # not the tuner moved, and a transponder that is flat from its very
-        # first sample looks exactly like one we never tuned to — we would be
-        # reading leftovers from the previous service. Asking the box which
-        # transponder it is on separates the two.
-        tuned = await _tuned_transponder(client)
-        # Three states, not two: in light standby /api/getcurrent frequently
-        # answers nothing at all (12 of 18 transponders on 2026-08-16, while
-        # those same transponders harvested as well as the rest). "Cannot tell"
-        # must not be reported as "wrong transponder".
-        tuned_ok = None if tuned is None else (tuned == key)
-        if tuned_ok is False:
-            mistuned += 1
         log.info("epg.prime_transponder", receiver=receiver.name,
                  transponder=":".join(key) if key else None,
-                 channel=rep.name, channels=len(group),
-                 tuned_ok=tuned_ok,
-                 tuned_to=(":".join(tuned) if tuned else None),
-                 **stats)
+                 channel=rep.name, channels=len(group), **stats)
     total_sec = round(loop.time() - tour_start)
     log.info("epg.prime_done", receiver=receiver.name,
              visited=visited, transponders=len(groups), total_sec=total_sec,
              hit_ceiling=hit_ceiling, unvisited=unvisited, aborted=aborted,
-             mistuned=mistuned,
              slowest_saturation_sec=max(saturated_times, default=None))
     return {"transponders": len(groups), "visited": visited,
             "total_sec": total_sec, "hit_ceiling": hit_ceiling,
-            "unvisited": unvisited, "aborted": aborted, "mistuned": mistuned}
+            "unvisited": unvisited, "aborted": aborted}
 
 
 def important_channel_ids(db: Session) -> set[int]:
