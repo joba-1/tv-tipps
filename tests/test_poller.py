@@ -437,24 +437,34 @@ class TestNightWakeGate:
 
         monkeypatch.setattr(poller, "_wake_epg_receivers", fake_wake_all)
         monkeypatch.setattr(poller, "_refresh_all_epg", fake_sweep)
+        monkeypatch.setattr(poller, "_visible_horizon", lambda: 5.0)
         return SimpleNamespace(calls=calls, monkeypatch=monkeypatch)
 
     @pytest.mark.asyncio
-    async def test_fresh_epg_means_no_wake(self, gate):
-        gate.monkeypatch.setattr(poller, "_visible_horizon", lambda: 6.2)
+    async def test_covered_epg_means_no_wake(self, gate):
+        gate.monkeypatch.setattr(poller, "_coverage", lambda: (1.0, 33, 33))
         await poller._nightly_full_sweep()
         assert gate.calls.woken == []
         assert gate.calls.swept == 1     # still sweeps whatever is reachable
 
     @pytest.mark.asyncio
     async def test_decayed_epg_earns_the_wake(self, gate):
-        gate.monkeypatch.setattr(poller, "_visible_horizon", lambda: 0.4)
+        gate.monkeypatch.setattr(poller, "_coverage", lambda: (0.3, 10, 33))
         await poller._nightly_full_sweep()
         assert gate.calls.woken == ["wake"]
 
     @pytest.mark.asyncio
-    async def test_unknown_horizon_falls_back_to_waking(self, gate):
+    async def test_unmeasurable_coverage_falls_back_to_waking(self, gate):
         """Cannot measure it — behave as before rather than silently stop."""
-        gate.monkeypatch.setattr(poller, "_visible_horizon", lambda: None)
+        gate.monkeypatch.setattr(poller, "_coverage", lambda: (None, 0, 0))
         await poller._nightly_full_sweep()
         assert gate.calls.woken == ["wake"]
+
+    @pytest.mark.asyncio
+    async def test_shallow_broadcasters_do_not_force_a_wake(self, gate):
+        """The point of coverage over horizon: stations that only ever transmit
+        two days must not drag the decision down while they are current."""
+        gate.monkeypatch.setattr(poller, "_coverage", lambda: (0.75, 24, 33))
+        gate.monkeypatch.setattr(poller, "_visible_horizon", lambda: 1.9)
+        await poller._nightly_full_sweep()
+        assert gate.calls.woken == []

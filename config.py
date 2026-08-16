@@ -76,10 +76,25 @@ class Settings(BaseSettings):
     epg_opportunistic_check_min: int = 10
     epg_opportunistic_cooldown_h: int = 6
     # The nightly wake is the expensive path — it boots the box, and the boot
-    # turns the TV on. Only take it when the data has actually decayed: below
-    # this median horizon across the channels users can see. Stale EPG is a
-    # mild annoyance; a TV waking the household at 03:30 is not.
-    epg_night_wake_below_days: float = 3.0
+    # turns the TV on. Stale EPG is a mild annoyance; a TV waking the household
+    # at 03:30 is not, so the bar for waking is deliberately high.
+    #
+    # Judging that by horizon alone is wrong: broadcasters differ by a factor of
+    # five in how far ahead they transmit (measured 2026-08-16 — ZDF/ARD ~320 h,
+    # RTL ~166 h, ProSieben ~130 h, TELE 5 and DMAX 62 h). A median across all
+    # channels is dragged under the threshold by stations that were never deep
+    # to begin with, while the ones actually watched are still days ahead.
+    #
+    # So the question is near-term *coverage* on the channels that matter: does
+    # each still reach far enough ahead to be useful? A 2-day broadcaster passes
+    # while it is current and fails only once it has genuinely run dry.
+    epg_coverage_hours: int = 36
+    epg_night_wake_below_coverage: float = 0.7
+    # Which channels count. Empty = derive from what the household actually
+    # watches (confirmed viewing sessions in this window); set a comma-separated
+    # list of channel names to pin it by hand instead.
+    epg_important_channels: str = ""
+    epg_important_days: int = 60
     # Viewing sessions older than this are pruned nightly. They stop feeding
     # the taste profile after 30 days anyway and only pin their EPG events
     # against cleanup; keep a generous window for the admin activity view.

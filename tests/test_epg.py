@@ -707,3 +707,89 @@ class TestTunedVerification:
         out = await prime_epg_cache(rcv, NoCurrent([7]), [ch], **_BOUNDS)
         # Unreadable is not the same as wrong: the box simply would not say.
         assert out["mistuned"] == 0
+
+
+# ── Which channels the night-wake decision listens to ─────────────────────────
+
+from app.services.epg import important_channel_ids, epg_coverage  # noqa: E402
+from unittest.mock import patch  # noqa: E402
+from config import settings  # noqa: E402
+
+
+class TestImportantChannels:
+    """Broadcasters differ five-fold in how far ahead they transmit, so the
+    decision has to look at the channels this household actually watches."""
+
+    @pytest.mark.asyncio
+    async def test_derived_from_confirmed_viewing(self, db: Session, monkeypatch):
+        from tests.conftest import make_channel, make_user, make_session
+        monkeypatch.setattr(settings, "epg_important_channels", "")
+        user = make_user(db)
+        watched = make_channel(db, sref="1:0:1:A:1:1:C00000:0:0:0:", name="ZDF HD")
+        ignored = make_channel(db, sref="1:0:1:B:1:1:C00000:0:0:0:", name="Shopping")
+        db.commit()
+        make_session(db, user, watched, confirmed=True)
+        db.commit()
+        ids = important_channel_ids(db)
+        assert watched.id in ids
+        assert ignored.id not in ids
+
+    @pytest.mark.asyncio
+    async def test_unconfirmed_sessions_do_not_count(self, db: Session, monkeypatch):
+        """A channel someone flicked past is not a channel that matters."""
+        from tests.conftest import make_channel, make_user, make_session
+        monkeypatch.setattr(settings, "epg_important_channels", "")
+        user = make_user(db)
+        ch = make_channel(db, sref="1:0:1:A:1:1:C00000:0:0:0:", name="ZDF HD")
+        other = make_channel(db, sref="1:0:1:B:1:1:C00000:0:0:0:", name="Other")
+        db.commit()
+        make_session(db, user, ch, confirmed=False)
+        db.commit()
+        # No confirmed history at all → fall back to everything visible.
+        with patch("app.services.channels.get_channels_for_user",
+                   return_value=[ch, other]):
+            assert important_channel_ids(db) == {ch.id, other.id}
+
+    def test_explicit_list_wins(self, db: Session, monkeypatch):
+        from tests.conftest import make_channel
+        a = make_channel(db, sref="1:0:1:A:1:1:C00000:0:0:0:", name="ZDF HD")
+        make_channel(db, sref="1:0:1:B:1:1:C00000:0:0:0:", name="Das Erste HD")
+        db.commit()
+        monkeypatch.setattr(settings, "epg_important_channels", " zdf hd ")
+        assert important_channel_ids(db) == {a.id}
+
+
+class TestEpgCoverage:
+    @pytest.fixture
+    def two_channels(self, db: Session, monkeypatch):
+        from tests.conftest import make_channel
+        monkeypatch.setattr(settings, "epg_important_channels", "Deep,Shallow")
+        deep = make_channel(db, sref="1:0:1:A:1:1:C00000:0:0:0:", name="Deep")
+        shallow = make_channel(db, sref="1:0:1:B:1:1:C00000:0:0:0:", name="Shallow")
+        db.commit()
+        return deep, shallow
+
+    def test_current_but_shallow_channel_still_counts(self, db: Session, two_channels):
+        """A station that only ever sends two days is fine while it is current —
+        that is the whole reason this is coverage and not horizon."""
+        from tests.conftest import make_event
+        deep, shallow = two_channels
+        make_event(db, deep, offset_min=60 * 24 * 10)   # 10 days out
+        make_event(db, shallow, offset_min=60 * 44)     # 44 h out
+        db.commit()
+        assert epg_coverage(db, hours=36) == (1.0, 2, 2)
+
+    def test_channel_that_ran_dry_is_uncovered(self, db: Session, two_channels):
+        from tests.conftest import make_event
+        deep, shallow = two_channels
+        make_event(db, deep, offset_min=60 * 24 * 10)
+        make_event(db, shallow, offset_min=60 * 5)      # only 5 h left
+        db.commit()
+        assert epg_coverage(db, hours=36) == (0.5, 1, 2)
+
+    def test_no_epg_at_all(self, db: Session, two_channels):
+        assert epg_coverage(db, hours=36) == (0.0, 0, 2)
+
+    def test_nothing_important_is_unmeasurable(self, db: Session, monkeypatch):
+        monkeypatch.setattr(settings, "epg_important_channels", "NoSuchChannel")
+        assert epg_coverage(db, hours=36) == (None, 0, 0)

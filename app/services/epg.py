@@ -1,6 +1,6 @@
 """EPG fetch, cache, and query."""
 from __future__ import annotations
-from datetime import datetime
+from datetime import datetime, timedelta
 from sqlalchemy import func, update
 from sqlalchemy.orm import Session
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
@@ -11,6 +11,7 @@ from app.services.forensics import dump_failure
 from app.services.scoring import enqueue_scoring
 from app.timezones import utcnow
 from app.logging_setup import get_logger
+from config import settings
 
 log = get_logger(__name__)
 
@@ -486,6 +487,66 @@ async def prime_epg_cache(
     return {"transponders": len(groups), "visited": visited,
             "total_sec": total_sec, "hit_ceiling": hit_ceiling,
             "unvisited": unvisited, "aborted": aborted, "mistuned": mistuned}
+
+
+def important_channel_ids(db: Session) -> set[int]:
+    """The channels whose EPG actually matters to this household.
+
+    Derived from confirmed viewing sessions rather than configured by hand, so
+    it follows real habits and needs no maintenance. An explicit list wins when
+    one is configured; with no viewing history yet we fall back to everything
+    the users can see.
+    """
+    from app.models import User, ViewingSession
+    from app.services.channels import get_channels_for_user
+
+    names = [n.strip().lower() for n in settings.epg_important_channels.split(",") if n.strip()]
+    if names:
+        return {
+            c.id for c in db.query(Channel).all()
+            if (c.name or "").strip().lower() in names
+        }
+
+    cutoff = utcnow() - timedelta(days=settings.epg_important_days)
+    watched = {
+        row[0] for row in
+        db.query(ViewingSession.channel_id)
+        .filter(ViewingSession.confirmed.is_(True),
+                ViewingSession.started_at >= cutoff)
+        .group_by(ViewingSession.channel_id)
+        .having(func.sum(ViewingSession.duration_sec) > 0)
+        .all()
+    }
+    if watched:
+        return watched
+
+    visible = set()
+    for user in db.query(User).all():
+        visible |= {c.id for c in get_channels_for_user(user.id, db)}
+    return visible
+
+
+def epg_coverage(db: Session, hours: int | None = None) -> tuple[float | None, int, int]:
+    """How much of what matters still has usable EPG.
+
+    Returns (fraction, covered, total) over the important channels — the share
+    whose EPG still reaches `hours` ahead. Coverage rather than horizon, because
+    broadcasters differ five-fold in transmit depth: a station that only ever
+    sends two days is fine while it is current, and a median over everything
+    would call the whole set stale on its account alone.
+    """
+    hours = settings.epg_coverage_hours if hours is None else hours
+    ids = important_channel_ids(db)
+    if not ids:
+        return None, 0, 0
+    deadline = utcnow() + timedelta(hours=hours)
+    covered = (
+        db.query(EpgEvent.channel_id)
+        .filter(EpgEvent.channel_id.in_(ids), EpgEvent.start_time >= deadline)
+        .distinct()
+        .count()
+    )
+    return round(covered / len(ids), 2), covered, len(ids)
 
 
 def visible_epg_horizon_days(db: Session) -> float | None:

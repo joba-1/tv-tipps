@@ -10,7 +10,7 @@ from app.models import Receiver
 from app.enigma.client import EnigmaClient
 from app.services.channels import refresh_channels
 from app.services.epg import (
-    refresh_now_next, cleanup_old_events, visible_epg_horizon_days,
+    refresh_now_next, cleanup_old_events, visible_epg_horizon_days, epg_coverage,
 )
 from app.services.power import wake_for_epg, shutdown_for_epg
 from app.logging_setup import get_logger
@@ -343,18 +343,22 @@ async def _nightly_full_sweep() -> None:
 
 
 async def _nightly_full_sweep_locked() -> None:
+    coverage, covered, total = _coverage()
     horizon = _visible_horizon()
-    if horizon is not None and horizon >= settings.epg_night_wake_below_days:
-        # Standby harvesting has kept the data current, so skip the one path
-        # that boots the box — booting pulses HDMI-CEC and the TV switches
-        # itself on, which at 03:30 is worse than a slightly shorter horizon.
-        log.info("epg.night_wake_skipped", horizon_days=horizon,
-                 threshold_days=settings.epg_night_wake_below_days)
+    if coverage is not None and coverage >= settings.epg_night_wake_below_coverage:
+        # Standby harvesting has kept the channels that matter current, so skip
+        # the one path that boots the box — booting pulses HDMI-CEC and the TV
+        # switches itself on, which at 03:30 is worse than any amount of missing
+        # schedule.
+        log.info("epg.night_wake_skipped", coverage=coverage,
+                 covered=covered, important=total, horizon_days=horizon,
+                 threshold=settings.epg_night_wake_below_coverage)
         await _refresh_all_epg(full=True)
         return
 
-    log.info("epg.night_wake_needed", horizon_days=horizon,
-             threshold_days=settings.epg_night_wake_below_days)
+    log.info("epg.night_wake_needed", coverage=coverage,
+             covered=covered, important=total, horizon_days=horizon,
+             threshold=settings.epg_night_wake_below_coverage)
     woken = await _wake_epg_receivers()
     try:
         for rcfg in woken:
@@ -388,6 +392,17 @@ def _visible_horizon() -> float | None:
     except Exception as e:
         log.warning("epg.horizon_failed", error=str(e))
         return None
+    finally:
+        db.close()
+
+
+def _coverage() -> tuple[float | None, int, int]:
+    db = SessionLocal()
+    try:
+        return epg_coverage(db)
+    except Exception as e:
+        log.warning("epg.coverage_failed", error=str(e))
+        return None, 0, 0
     finally:
         db.close()
 

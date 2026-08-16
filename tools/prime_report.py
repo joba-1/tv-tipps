@@ -92,8 +92,8 @@ _ATTEMPT_EVENTS = {
     "epg.wake_failed_powered_down": "mains switched back off",
     "epg.wake_skip_online": "skipped: receiver was already on",
     "epg.prime_aborted_user_active": "tour aborted: {claim} took the box",
-    "epg.night_wake_skipped": "night wake skipped: EPG still {horizon_days} days deep",
-    "epg.night_wake_needed": "night wake taken: EPG down to {horizon_days} days",
+    "epg.night_wake_skipped": "night wake skipped: {covered}/{important} important channels still covered",
+    "epg.night_wake_needed": "night wake taken: only {covered}/{important} important channels covered",
     "epg.opportunistic_start": "standby harvest started",
     "epg.opportunistic_done": "standby harvest finished ({horizon_days} days deep)",
 }
