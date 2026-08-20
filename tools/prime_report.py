@@ -11,9 +11,13 @@ the system would notice.
     prime_report.py            # print the report
     prime_report.py --mail     # e-mail it (used by cron at 05:00)
     prime_report.py --days 14  # widen the history window
+
+--mail stays quiet on the mornings the report has nothing to say; the report
+itself is always printed, so the cron log keeps every night either way.
 """
 from __future__ import annotations
 import argparse
+import functools
 import json
 import statistics
 import subprocess
@@ -31,6 +35,10 @@ _DEFAULT_BOUNDS = {"min_sec": 25, "flat_sec": 10, "max_sec": 120}
 # Below this fraction of a transponder's historical median we call it a drop
 # worth reporting rather than normal night-to-night variation.
 DROP_RATIO = 0.5
+# With the forced night scan this many days out or further, the box is not going
+# to boot itself and switch the TV on any time soon. A mail that says so every
+# morning only teaches the eye to skip it, so it is not sent at all.
+QUIET_DAYS = 3
 
 
 def journal_events(days: int) -> list[dict]:
@@ -140,18 +148,27 @@ def epg_freshness() -> list[str]:
     ]
 
 
+@functools.lru_cache(maxsize=1)
+def admin_status() -> dict:
+    """The live service status, or {"unreachable": reason}. Cached because the
+    report reads it once for its own line and once to decide about mailing."""
+    import urllib.request
+    try:
+        with urllib.request.urlopen(STATUS_URL, timeout=10) as r:
+            return json.load(r)
+    except Exception as e:  # a report must never fail on its own diagnostics
+        return {"unreachable": str(e)}
+
+
 def forced_scan_status() -> tuple[list[str], list[str]]:
     """How long until EPG decay forces a night wake — and the wake boots the
     box, which switches the TV on. Returns (report lines, alerts).
 
     Green while there is room, yellow when it lands on the coming night, red
     once the threshold is already breached."""
-    import urllib.request
-    try:
-        with urllib.request.urlopen(STATUS_URL, timeout=10) as r:
-            d = json.load(r)
-    except Exception as e:
-        return [f"  forced night scan    : unknown ({e})"], []
+    d = admin_status()
+    if "unreachable" in d:
+        return [f"  forced night scan    : unknown ({d['unreachable']})"], []
 
     days = d.get("epg_days_until_forced_scan")
     cov = d.get("epg_coverage")
@@ -372,6 +389,22 @@ def report(runs: list[dict], events: list[dict], hours: int = 24) -> str:
     return "\n".join(lines)
 
 
+def quiet_reason(text: str) -> str | None:
+    """Why this report should not be mailed, or None to send it.
+
+    The mail earns its place by warning that the box is about to boot and
+    switch the TV on. While that is still QUIET_DAYS or more away and the
+    report flags nothing else, there is nothing to warn about. Anything that
+    needs attention — and an unreachable service, which leaves the distance
+    unknown — is mailed regardless of how much room the coverage has."""
+    if "FAILED" in text or "Needs attention:" in text:
+        return None
+    days = admin_status().get("epg_days_until_forced_scan")
+    if days is None or days < QUIET_DAYS:
+        return None
+    return f"nothing to report and the forced night scan is {days} days out"
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--days", type=int, default=7, help="journal window (default 7)")
@@ -383,6 +416,10 @@ def main() -> int:
     print(text)
 
     if args.mail:
+        quiet = quiet_reason(text)
+        if quiet:
+            print(f"\n(not mailed: {quiet})")
+            return 0
         subject = "tv-tipps EPG wake report"
         if "FAILED" in text:
             subject += " — FAILED"
