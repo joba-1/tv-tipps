@@ -37,6 +37,12 @@ DATA_DIR="/var/lib/tv-tipps"
 CONF_DIR="/etc/tv-tipps"
 ENV_FILE="$CONF_DIR/env"
 SERVICE_FILE="/etc/systemd/system/tv-tipps.service"
+# The morning report on the night's EPG wake run. Shipped as a timer so the
+# schedule is installed with the code instead of living in somebody's crontab,
+# where it would keep pointing at a git checkout that may be mid-edit or gone.
+REPORT_SERVICE_FILE="/etc/systemd/system/tv-tipps-report.service"
+REPORT_TIMER_FILE="/etc/systemd/system/tv-tipps-report.timer"
+REPORT_ONCALENDAR="*-*-* 05:00:00"
 VERSION=$(cat VERSION 2>/dev/null || echo "?")
 SCRIPT_DIR=$(cd "$(dirname "$0")" && pwd)
 
@@ -170,6 +176,48 @@ systemctl daemon-reload
 systemctl enable tv-tipps
 systemctl restart tv-tipps
 
+# ── nightly report timer ──────────────────────────────────────────────────────
+echo "--> Installing report timer …"
+cat > "$REPORT_SERVICE_FILE" <<EOF
+[Unit]
+Description=tv-tipps EPG wake report for the past night
+After=tv-tipps.service
+
+[Service]
+Type=oneshot
+User=$SERVICE_USER
+WorkingDirectory=$APP_DIR
+ExecStart=$APP_DIR/.venv/bin/python3 $APP_DIR/tools/prime_report.py --mail
+SyslogIdentifier=tv-tipps-report
+EOF
+
+cat > "$REPORT_TIMER_FILE" <<EOF
+[Unit]
+Description=Run the tv-tipps EPG wake report every morning
+
+[Timer]
+OnCalendar=$REPORT_ONCALENDAR
+# Catch up after downtime: a night with no report is exactly the night worth
+# reading about.
+Persistent=true
+AccuracySec=1min
+
+[Install]
+WantedBy=timers.target
+EOF
+
+systemctl daemon-reload
+systemctl enable --now tv-tipps-report.timer
+
+# The timer now owns this schedule; a leftover cron line would mail it twice.
+if crontab -l -u "$SERVICE_USER" 2>/dev/null | grep -q 'prime_report'; then
+    echo
+    echo "WARNING: $SERVICE_USER's crontab still runs prime_report.py."
+    echo "         tv-tipps-report.timer now owns that schedule — remove the cron"
+    echo "         line, or the report gets mailed twice every morning:"
+    echo "           crontab -e     # as $SERVICE_USER"
+fi
+
 # ── success ───────────────────────────────────────────────────────────────────
 echo
 echo "✓ tv-tipps v${VERSION} installed and started on port ${PORT}"
@@ -185,5 +233,7 @@ echo "  3. Open in browser:"
 echo "     http://$(hostname -I | awk '{print $1}'):${PORT}/"
 echo "  4. Check logs:"
 echo "     journalctl -u tv-tipps -f"
+echo "     journalctl -u tv-tipps-report      # the morning EPG report"
+echo "     systemctl list-timers tv-tipps-report.timer"
 echo "  5. Update later:"
 echo "     cd $SCRIPT_DIR && git pull && sudo ./deploy.sh --prefix $PREFIX --port $PORT --user $SERVICE_USER"

@@ -48,9 +48,23 @@ echo "Stopping $SERVICE if running…"
 systemctl stop "$SERVICE" 2>/dev/null || true
 systemctl disable "$SERVICE" 2>/dev/null || true
 
-if [[ -f "$UNIT_FILE" ]]; then
-  echo "Removing $UNIT_FILE"
-  rm -f "$UNIT_FILE"
+# The report timer would otherwise keep firing every morning against an app
+# directory that is no longer there.
+for u in "$NAME-report.timer" "$NAME-report.service"; do
+  systemctl stop "$u" 2>/dev/null || true
+  systemctl disable "$u" 2>/dev/null || true
+done
+
+removed=0
+for f in "$UNIT_FILE" "/etc/systemd/system/$NAME-report.service" \
+         "/etc/systemd/system/$NAME-report.timer"; do
+  if [[ -f "$f" ]]; then
+    echo "Removing $f"
+    rm -f "$f"
+    removed=1
+  fi
+done
+if [[ $removed -eq 1 ]]; then
   systemctl daemon-reload
 fi
 

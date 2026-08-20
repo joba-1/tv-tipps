@@ -9,8 +9,17 @@ usual event count means the dwell bounds need revisiting, and nothing else in
 the system would notice.
 
     prime_report.py            # print the report
-    prime_report.py --mail     # e-mail it (used by cron at 05:00)
+    prime_report.py --mail     # e-mail it (what the 05:00 timer runs)
     prime_report.py --days 14  # widen the history window
+
+Scheduled by tv-tipps-report.timer at 05:00, which deploy.sh installs alongside
+the service. It runs the *installed* copy under /usr/local/lib/tv-tipps — never
+this checkout, which may be mid-edit, on a branch, or gone — and deploy.sh
+rsyncs tools/ with the app, so a deploy updates the report too.
+
+    systemctl list-timers tv-tipps-report.timer
+    systemctl start tv-tipps-report      # run one now
+    journalctl -u tv-tipps-report        # what it printed
 
 --mail stays quiet on the mornings the report has nothing to say; the report
 itself is always printed, so the cron log keeps every night either way.
