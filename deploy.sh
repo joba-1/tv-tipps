@@ -114,7 +114,7 @@ if [[ ! -f "$ENV_FILE" ]]; then
 
 # ── Ollama ───────────────────────────────────────────────────────────────────
 OLLAMA_URL=http://localhost:11434
-OLLAMA_MODEL=qwen3.5:9b
+OLLAMA_MODEL=qwen3.6:latest
 
 # ── EPG & poller ─────────────────────────────────────────────────────────────
 POLL_INTERVAL_SEC=45
@@ -224,7 +224,7 @@ echo "✓ tv-tipps v${VERSION} installed and started on port ${PORT}"
 echo
 echo "Next steps:"
 echo "  1. Edit config:   $ENV_FILE"
-echo "     - Set OLLAMA_MODEL to a model you have pulled (ollama pull qwen3.5:9b)"
+echo "     - Set OLLAMA_MODEL to a model you have pulled (ollama pull qwen3.6:latest)"
 echo "     - Adjust TIMEZONE to your local timezone"
 echo "     - Optionally set INTERTECHNO_URL if using an RF power switch"
 echo "  2. Restart after config changes:"

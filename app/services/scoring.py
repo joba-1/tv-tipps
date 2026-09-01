@@ -164,7 +164,7 @@ LISTE:
 
 ANTWORT-FORMAT — exakt diese JSON-Struktur:
 {{"scores": [{{"score": <0.0..1.0>, "reason": "<1–2 Sätze, Bezug zum Nutzer>"}}, ...]}}
-Gib GENAU {len(events)} Einträge aus — einen pro Zeile in der LISTE, in DERSELBEN REIHENFOLGE wie die LISTE (Eintrag 1 = [1], Eintrag 2 = [2], usw.). Keine Index-Nummern in der Antwort. `reason` referenziert Profil/Likes/Dislikes/Historie und erklärt den Bezug konkret — kein neutrales Beschreiben der Sendung, kein Geschwafel.
+Gib GENAU {len(events)} Einträge aus — einen pro Zeile in der LISTE, in DERSELBEN REIHENFOLGE wie die LISTE (Eintrag 1 = [1], Eintrag 2 = [2], usw.). Keine Index-Nummern in der Antwort. `reason` referenziert Profil/Likes/Dislikes/Historie und erklärt den Bezug konkret — kein neutrales Beschreiben der Sendung, kein Geschwafel. Jede `reason` MUSS auf Deutsch sein.
 """
 
 
