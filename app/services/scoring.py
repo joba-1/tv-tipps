@@ -237,32 +237,67 @@ LISTE:
 {cand_str}
 
 ANTWORT-FORMAT — exakt diese JSON-Struktur:
-{{"scores": [{{"score": <0.0..1.0>, "reason": "<1–2 Sätze, Bezug zum Nutzer>"}}, ...]}}
-Gib GENAU {len(events)} Einträge aus — einen pro Zeile in der LISTE, in DERSELBEN REIHENFOLGE wie die LISTE (Eintrag 1 = [1], Eintrag 2 = [2], usw.). Keine Index-Nummern in der Antwort. `reason` referenziert Profil/Likes/Dislikes/Historie und erklärt den Bezug konkret — kein neutrales Beschreiben der Sendung, kein Geschwafel. Jede `reason` MUSS auf Deutsch sein.
+{{"scores": [{{"index": <Nummer aus der LISTE>, "score": <0.0..1.0>, "reason": "<1–2 Sätze, Bezug zum Nutzer>"}}, ...]}}
+Gib GENAU {len(events)} Einträge aus — einen pro Zeile in der LISTE, jeder mit `index` = der Nummer der Zeile ([1] → 1). Die Reihenfolge der Einträge spielt keine Rolle, der `index` entscheidet. `reason` referenziert Profil/Likes/Dislikes/Historie und erklärt den Bezug konkret — kein neutrales Beschreiben der Sendung, kein Geschwafel. Jede `reason` MUSS auf Deutsch sein.
 """
 
 
-def _parse_scoring_response(raw: dict | str | None) -> list[tuple[float, str]]:
-    """List of (score_0_to_1, reason) in response order. Caller matches them
-    positionally to the input chunk. Returning [] signals "unusable response"
-    so the caller can fall back / halve."""
+def _parse_scoring_response(raw: dict | str | None) -> list[tuple[int | None, float, str]]:
+    """List of (index, score_0_to_1, reason) in response order. `index` is the
+    candidate number the model echoed, or None if it did not echo one. Returning
+    [] signals "unusable response" so the caller can fall back / halve."""
     if not isinstance(raw, dict):
         return []
     items = raw.get("scores") or raw.get("ranking") or []
     if not isinstance(items, list):
         return []
-    out: list[tuple[float, str]] = []
+    out: list[tuple[int | None, float, str]] = []
     for it in items:
         if not isinstance(it, dict):
             continue
+        try:
+            idx = int(it.get("index"))
+        except (TypeError, ValueError):
+            idx = None
         try:
             sc = float(it.get("score", 0.5))
         except (TypeError, ValueError):
             sc = 0.5
         sc = max(0.0, min(1.0, sc))
         reason = str(it.get("reason") or "").strip()[:240]
-        out.append((sc, reason))
+        out.append((idx if idx and idx >= 1 else None, sc, reason))
     return out
+
+
+def _align_to_chunk(
+    parsed: list[tuple[int | None, float, str]], n: int,
+) -> list[tuple[int | None, float, str]] | None:
+    """Put a parsed response into candidate order.
+
+    Three cases:
+      - every entry carries an index and together they are exactly 1..n → sort by
+        index. The model may answer in any order; the index says what is what.
+      - no entry carries an index, or every entry carries the *same* one (a
+        model filling the field with a constant instead of using it) → return the
+        list unchanged. Positional matching is then all we have — same as before
+        the index existed, and strictly better than retrying would be: a chunk
+        that falls back to rule scores is worth less than a positional LLM score.
+      - every entry carries an index and together they are exactly 1..n → sort by
+        index. The model may answer in any order; the index says what is what.
+      - some entries carry an index, but the set is not 1..n (duplicated, out of
+        range, missing) → None. The model answered about one candidate twice and
+        skipped another, so positional matching would write scores onto the wrong
+        events. The caller retries instead.
+    """
+    idx = [i for i, _, _ in parsed]
+    if all(i is None for i in idx):
+        return parsed
+    if len(set(idx)) == 1:
+        # Every entry claims the same candidate: nothing to sort by.
+        return parsed
+    if any(i is None for i in idx) or sorted(idx) != list(range(1, n + 1)):
+        return None
+    return sorted(parsed, key=lambda t: t[0])
 
 
 # ─── Rule-based fallback ────────────────────────────────────────────────────
@@ -477,6 +512,26 @@ async def score_events_for_user(
     return written
 
 
+async def _halve_or_rule(
+    user_name: str, profile: dict,
+    history: list[dict], likes: list[dict], dislikes: list[dict],
+    chunk: list[tuple[EpgEvent, Channel]], event: str, **fields,
+) -> list[tuple[int, float, str | None, str]]:
+    """Shared remedy for a response we cannot attribute to the chunk: split and
+    retry once, or fall back to rule scores when the chunk is already small
+    enough that splitting would not help. `event` is the log event name."""
+    fields["chunk"] = len(chunk)
+    if len(chunk) > 12:
+        log.warning(f"{event}_halve", **fields)
+        half = len(chunk) // 2
+        return (
+            await _score_chunk(user_name, profile, history, likes, dislikes, chunk[:half])
+            + await _score_chunk(user_name, profile, history, likes, dislikes, chunk[half:])
+        )
+    log.warning(f"{event}_fallback_rule", **fields)
+    return [(ev.id, _rule_score(ev, ch), None, "rule") for ev, ch in chunk]
+
+
 async def _score_chunk(
     user_name: str, profile: dict,
     history: list[dict], likes: list[dict], dislikes: list[dict],
@@ -487,6 +542,13 @@ async def _score_chunk(
     # Hard-constrain the response shape: exactly len(chunk) entries, each with a
     # numeric 0..1 score and a string reason. Prompt instructions alone were not
     # enforcing the count — gemma4 reliably dropped one entry per batch.
+    #
+    # `index` is what makes the answer attributable. The grammar guarantees the
+    # count, not that entry k is about candidate k: a model can satisfy minItems
+    # with one candidate answered twice and another skipped, and then *every*
+    # score after the gap lands on the wrong event — silently. With the index the
+    # mismatch is visible (see _align_to_chunk) and the batch is retried instead
+    # of written wrong. Cost: ~4 output tokens per candidate.
     n = len(chunk)
     schema = {
         "type": "object",
@@ -498,10 +560,11 @@ async def _score_chunk(
                 "items": {
                     "type": "object",
                     "properties": {
+                        "index": {"type": "integer", "minimum": 1, "maximum": n},
                         "score": {"type": "number", "minimum": 0, "maximum": 1},
                         "reason": {"type": "string"},
                     },
-                    "required": ["score", "reason"],
+                    "required": ["index", "score", "reason"],
                 },
             },
         },
@@ -529,24 +592,32 @@ async def _score_chunk(
 
     _mark_ai_alive()
     parsed = _parse_scoring_response(raw)
-    # Length mismatch = the model skipped or added an event. Without an index
-    # field we can no longer realign, so treat this as an unusable response
-    # and fall through to halve/retry — same as a hard parse failure.
+    # Length mismatch = the model skipped or added an event → unusable response.
     if not parsed or len(parsed) != len(chunk):
-        if len(chunk) > 12:
-            log.warning("scoring.parse_mismatch_halve",
-                        chunk=len(chunk), got=len(parsed))
-            half = len(chunk) // 2
-            return (
-                await _score_chunk(user_name, profile, history, likes, dislikes, chunk[:half])
-                + await _score_chunk(user_name, profile, history, likes, dislikes, chunk[half:])
-            )
-        log.warning("scoring.parse_mismatch_fallback_rule",
-                    chunk=len(chunk), got=len(parsed))
-        return [(ev.id, _rule_score(ev, ch), None, "rule") for ev, ch in chunk]
+        return await _halve_or_rule(user_name, profile, history, likes, dislikes,
+                                    chunk, "scoring.parse_mismatch", got=len(parsed))
+    aligned = _align_to_chunk(parsed, len(chunk))
+    if aligned is not None:
+        # Visibility for the field itself: what the model actually does with the
+        # index it is asked for. A clean in-order answer stays silent; the three
+        # deviations are worth a line each.
+        idx = [i for i, _, _ in parsed]
+        if all(i is None for i in idx):
+            log.info("scoring.index_absent", chunk=len(chunk))
+        elif len(set(idx)) == 1:
+            log.info("scoring.index_constant", chunk=len(chunk), index=idx[0])
+        elif idx != list(range(1, len(chunk) + 1)):
+            log.info("scoring.index_shuffled", chunk=len(chunk), indices=idx[:30])
+    if aligned is None:
+        # The model answered about one candidate twice and skipped another; the
+        # count is right, so nothing else would have caught it.
+        return await _halve_or_rule(
+            user_name, profile, history, likes, dislikes, chunk,
+            "scoring.index_mismatch", indices=[i for i, _, _ in parsed][:30])
+    parsed = aligned
 
     triples: list[tuple[int, float, str | None, str]] = []
-    for (ev, ch), (score, reason) in zip(chunk, parsed):
+    for (ev, ch), (_, score, reason) in zip(chunk, parsed):
         triples.append((ev.id, score, reason or None, "llm"))
     return triples
 

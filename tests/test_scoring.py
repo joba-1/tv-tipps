@@ -8,7 +8,8 @@ from app import models
 from app.services.scoring import (
     _candidate_desc, _split_credits, _credits_line, _window_event_ids,
     _build_scoring_prompt, _CAND_DESC_MAX_CHARS, _CREDITS_LINE_MAX_CHARS,
-    _parse_scoring_response, _rule_score, _score_chunk, _upsert_scores,
+    _parse_scoring_response, _align_to_chunk, _rule_score, _score_chunk,
+    _upsert_scores,
     good_scores_for_events, set_explicit_score, clear_explicit_score,
     mark_user_llm_rows_stale, _stale_future_event_ids,
     _get_recent_history, _get_recent_reactions,
@@ -22,31 +23,87 @@ from tests.conftest import make_channel, make_event, make_user, make_session
 
 class TestParseScoringResponse:
     def test_valid_response(self):
-        raw = {"scores": [{"score": 0.8, "reason": "passt"}, {"score": 0.2, "reason": "nö"}]}
+        raw = {"scores": [{"index": 1, "score": 0.8, "reason": "passt"},
+                          {"index": 2, "score": 0.2, "reason": "nö"}]}
         out = _parse_scoring_response(raw)
-        assert out == [(0.8, "passt"), (0.2, "nö")]
+        assert out == [(1, 0.8, "passt"), (2, 0.2, "nö")]
 
     def test_non_dict_returns_empty(self):
         assert _parse_scoring_response(None) == []
         assert _parse_scoring_response("text") == []
 
     def test_scores_clamped_to_0_1(self):
-        raw = {"scores": [{"score": 1.7, "reason": "a"}, {"score": -0.3, "reason": "b"}]}
+        raw = {"scores": [{"index": 1, "score": 1.7, "reason": "a"},
+                          {"index": 2, "score": -0.3, "reason": "b"}]}
         out = _parse_scoring_response(raw)
-        assert out[0][0] == 1.0
-        assert out[1][0] == 0.0
+        assert out[0][1] == 1.0
+        assert out[1][1] == 0.0
 
     def test_bad_score_defaults_to_neutral(self):
-        raw = {"scores": [{"score": "hoch", "reason": "a"}]}
-        assert _parse_scoring_response(raw)[0][0] == 0.5
+        raw = {"scores": [{"index": 1, "score": "hoch", "reason": "a"}]}
+        assert _parse_scoring_response(raw)[0][1] == 0.5
 
     def test_non_dict_items_skipped(self):
-        raw = {"scores": [{"score": 0.5, "reason": "ok"}, "junk", 3]}
+        raw = {"scores": [{"index": 1, "score": 0.5, "reason": "ok"}, "junk", 3]}
         assert len(_parse_scoring_response(raw)) == 1
 
     def test_reason_truncated(self):
-        raw = {"scores": [{"score": 0.5, "reason": "x" * 500}]}
-        assert len(_parse_scoring_response(raw)[0][1]) == 240
+        raw = {"scores": [{"index": 1, "score": 0.5, "reason": "x" * 500}]}
+        assert len(_parse_scoring_response(raw)[0][2]) == 240
+
+    def test_missing_index_is_none(self):
+        raw = {"scores": [{"score": 0.8, "reason": "a"}]}
+        assert _parse_scoring_response(raw) == [(None, 0.8, "a")]
+
+    def test_junk_index_is_none(self):
+        raw = {"scores": [{"index": "vorne", "score": 0.8, "reason": "a"},
+                          {"index": None, "score": 0.2, "reason": "b"},
+                          {"index": 0, "score": 0.3, "reason": "c"}]}
+        assert [t[0] for t in _parse_scoring_response(raw)] == [None, None, None]
+
+    def test_numeric_string_index_is_kept(self):
+        raw = {"scores": [{"index": "2", "score": 0.8, "reason": "a"}]}
+        assert _parse_scoring_response(raw)[0][0] == 2
+
+
+# ── _align_to_chunk ───────────────────────────────────────────────────────────
+
+class TestAlignToChunk:
+    def test_complete_index_set_is_sorted(self):
+        parsed = [(3, 0.3, "c"), (1, 0.1, "a"), (2, 0.2, "b")]
+        assert _align_to_chunk(parsed, 3) == [(1, 0.1, "a"), (2, 0.2, "b"), (3, 0.3, "c")]
+
+    def test_correct_order_stays(self):
+        parsed = [(1, 0.1, "a"), (2, 0.2, "b")]
+        assert _align_to_chunk(parsed, 2) == parsed
+
+    def test_no_indices_at_all_is_positional(self):
+        # A model that ignores the field keeps the old positional behaviour.
+        parsed = [(None, 0.1, "a"), (None, 0.2, "b")]
+        assert _align_to_chunk(parsed, 2) == parsed
+
+    def test_constant_index_is_treated_as_not_echoed(self):
+        # A model filling the field with a constant has not attributed anything;
+        # falling back to rule scores over that would be worse than positional.
+        parsed = [(1, 0.1, "a"), (1, 0.2, "b")]
+        assert _align_to_chunk(parsed, 2) == parsed
+
+    def test_one_candidate_with_index_one(self):
+        parsed = [(1, 0.4, "a")]
+        assert _align_to_chunk(parsed, 1) == parsed
+
+    def test_drifted_index_is_unattributable(self):
+        # Candidate 2 answered twice, candidate 3 never → positional would be wrong.
+        parsed = [(1, 0.1, "a"), (2, 0.2, "b"), (2, 0.3, "c")]
+        assert _align_to_chunk(parsed, 3) is None
+
+    def test_index_out_of_range_is_unattributable(self):
+        parsed = [(1, 0.1, "a"), (3, 0.2, "b")]
+        assert _align_to_chunk(parsed, 2) is None
+
+    def test_partially_missing_indices_are_unattributable(self):
+        parsed = [(1, 0.1, "a"), (None, 0.2, "b")]
+        assert _align_to_chunk(parsed, 2) is None
 
 
 # ── _rule_score fallback ──────────────────────────────────────────────────────
@@ -91,6 +148,7 @@ class TestScoreChunk:
 
     @pytest.mark.asyncio
     async def test_valid_response_maps_positionally(self, db: Session):
+        # No index in the response → the old positional matching still applies.
         chunk = _chunk_of(db, 2)
         raw = {"scores": [{"score": 0.9, "reason": "top"}, {"score": 0.1, "reason": "flop"}]}
         usage = {"prompt_overflow": False, "completion_truncated": False}
@@ -100,6 +158,63 @@ class TestScoreChunk:
         assert [(t[0], t[1], t[3]) for t in triples] == [
             (chunk[0][0].id, 0.9, "llm"), (chunk[1][0].id, 0.1, "llm"),
         ]
+
+    @pytest.mark.asyncio
+    async def test_shuffled_response_is_realigned_by_index(self, db: Session):
+        # The model answered in another order; the index says what is what, so
+        # every score still lands on its own event.
+        chunk = _chunk_of(db, 3)
+        raw = {"scores": [{"index": 3, "score": 0.3, "reason": "c"},
+                          {"index": 1, "score": 0.9, "reason": "a"},
+                          {"index": 2, "score": 0.5, "reason": "b"}]}
+        usage = {"prompt_overflow": False, "completion_truncated": False}
+        with patch("app.services.scoring.ask_json", new_callable=AsyncMock, return_value=raw), \
+             patch("app.services.scoring._ollama.last_usage", return_value=usage):
+            triples = await _score_chunk("Alice", {}, [], [], [], chunk)
+        assert [(t[0], t[1], t[2]) for t in triples] == [
+            (chunk[0][0].id, 0.9, "a"), (chunk[1][0].id, 0.5, "b"),
+            (chunk[2][0].id, 0.3, "c"),
+        ]
+
+    @pytest.mark.asyncio
+    async def test_duplicate_index_small_chunk_falls_back_to_rule(self, db: Session):
+        # Right count, wrong attribution: positional matching would write both
+        # scores onto the wrong events, so the batch is not used.
+        chunk = _chunk_of(db, 3)
+        raw = {"scores": [{"index": 1, "score": 0.9, "reason": "a"},
+                          {"index": 1, "score": 0.1, "reason": "b"},
+                          {"index": 2, "score": 0.5, "reason": "c"}]}
+        usage = {"prompt_overflow": False, "completion_truncated": False}
+        with patch("app.services.scoring.ask_json", new_callable=AsyncMock, return_value=raw), \
+             patch("app.services.scoring._ollama.last_usage", return_value=usage):
+            triples = await _score_chunk("Alice", {}, [], [], [], chunk)
+        assert len(triples) == 3
+        assert all(t[3] == "rule" for t in triples)
+
+    @pytest.mark.asyncio
+    async def test_drifted_index_large_chunk_halves(self, db: Session):
+        chunk = _chunk_of(db, 14)
+        usage = {"prompt_overflow": False, "completion_truncated": False}
+        calls = []
+
+        async def fake_ask(prompt, caller="", format_schema=None):
+            n = format_schema["properties"]["scores"]["minItems"]
+            calls.append(n)
+            # Full-size call: the count is right but the model drifted — it
+            # answered candidate 13 twice and never candidate 14. Positional
+            # matching would silently shift, so the batch must be retried halved.
+            idx = [i + 1 for i in range(n - 1)] + [n - 1] if len(calls) == 1 else None
+            if idx is None:
+                return {"scores": [{"index": i + 1, "score": 0.5, "reason": "r"}
+                                   for i in range(n)]}
+            return {"scores": [{"index": i, "score": 0.5, "reason": "r"} for i in idx]}
+
+        with patch("app.services.scoring.ask_json", side_effect=fake_ask), \
+             patch("app.services.scoring._ollama.last_usage", return_value=usage):
+            triples = await _score_chunk("Alice", {}, [], [], [], chunk)
+        assert calls == [14, 7, 7]
+        assert len(triples) == 14
+        assert all(t[3] == "llm" for t in triples)
 
     @pytest.mark.asyncio
     async def test_length_mismatch_small_chunk_falls_back_to_rule(self, db: Session):
