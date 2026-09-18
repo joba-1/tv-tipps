@@ -6,7 +6,8 @@ from unittest.mock import AsyncMock, patch
 from sqlalchemy.orm import Session
 from app import models
 from app.services.scoring import (
-    _candidate_desc, _build_scoring_prompt, _CAND_DESC_MAX_CHARS,
+    _candidate_desc, _split_credits, _credits_line, _window_event_ids,
+    _build_scoring_prompt, _CAND_DESC_MAX_CHARS, _CREDITS_LINE_MAX_CHARS,
     _parse_scoring_response, _rule_score, _score_chunk, _upsert_scores,
     good_scores_for_events, set_explicit_score, clear_explicit_score,
     mark_user_llm_rows_stale, _stale_future_event_ids,
@@ -212,6 +213,64 @@ class TestCandidateDesc:
         assert out.startswith("x" * 100)  # the structured line survives the cap
         assert "y" in out
 
+    def test_credits_survive_the_synopsis_cap(self, db: Session):
+        """Regression guard: a long synopsis used to push the credits block —
+        director and cast — out of the prompt entirely (5.5 % of all blocks;
+        the rest lost a median of 182 chars off the end)."""
+        ch = make_channel(db)
+        ev = make_event(db, ch, short_desc="Spielfilm, USA 1994",
+                        long_desc="x" * 900 + " Regie: Quentin Tarantino "
+                                  "Darsteller: John Travolta - Vincent Vega")
+        out = _candidate_desc(ev)
+        assert "Regie: Quentin Tarantino" in out
+        assert "Darsteller: John Travolta - Vincent Vega" in out
+        # synopsis cap + credits block, not one shared budget
+        assert len(out) > _CAND_DESC_MAX_CHARS
+        assert out.startswith("Spielfilm, USA 1994 xxx")
+
+    def test_credits_inside_the_cap_are_not_duplicated(self, db: Session):
+        ch = make_channel(db)
+        ev = make_event(db, ch, short_desc="Kurz", long_desc="Synopsis. Regie: Jemand")
+        assert _candidate_desc(ev) == "Kurz Synopsis. Regie: Jemand"
+
+    def test_credits_block_capped_on_its_own(self, db: Session):
+        ch = make_channel(db)
+        ev = make_event(db, ch, long_desc="Synopsis." + " Darsteller: " + "z" * 900)
+        out = _candidate_desc(ev)
+        assert out.count("z") == _CAND_DESC_MAX_CHARS - len("Darsteller: ")
+
+
+class TestSplitCredits:
+    def test_splits_synopsis_and_block(self):
+        syn, cred = _split_credits(
+            "Zwei Maler streiten. Regie: Brad Bird Darsteller: A - B, C - D")
+        assert syn == "Zwei Maler streiten."
+        assert cred == "Regie: Brad Bird Darsteller: A - B, C - D"
+
+    def test_without_block(self):
+        assert _split_credits("Nur ein Text.") == ("Nur ein Text.", "")
+
+    def test_does_not_fire_on_a_word_mention(self):
+        """"Regie" ohne Doppelpunkt ist Prosa, kein Credits-Block."""
+        syn, cred = _split_credits("Ein Film über die Regie in Hollywood.")
+        assert syn == "Ein Film über die Regie in Hollywood." and cred == ""
+
+
+class TestCreditsLine:
+    def test_director_and_cast_in_priority_order(self):
+        line = _credits_line(
+            "Inhalt. Kamera: Jemand Musik: Anderer Regie: Brad Bird "
+            "Darsteller: Remy - Patton Oswalt, Skinner - Ian Holm")
+        assert line == "Regie: Brad Bird Darsteller: Remy - Patton Oswalt, Skinner - Ian Holm"
+
+    def test_crew_only_yields_nothing(self):
+        """A block that names only the crew says nothing about taste."""
+        assert _credits_line("Inhalt. Kamera: Jemand Musik: Anderer") == ""
+
+    def test_capped(self):
+        line = _credits_line("Inhalt. Regie: " + "y" * 500)
+        assert len(line) == _CREDITS_LINE_MAX_CHARS
+
 
 class TestBuildScoringPrompt:
     def test_carries_both_epg_fields(self, db: Session):
@@ -252,6 +311,38 @@ class TestProfileContext:
         assert len(likes) == 60
         assert dislikes == []
 
+    def test_reactions_carry_the_credits_of_the_rated_event(self, db: Session):
+        """Director and cast are a strong taste signal — the model can only use
+        them if the liked film names them too."""
+        user = make_user(db)
+        ch = make_channel(db)
+        ev = make_event(db, ch, title="Ratatouille",
+                        long_desc="Ein Film. Regie: Brad Bird Kamera: Jemand")
+        db.add(models.UserLike(user_id=user.id, epg_event_id=ev.id, title="Ratatouille",
+                               sentiment="like", created_at=utcnow()))
+        db.commit()
+        likes, _ = _get_recent_reactions(user.id, db)
+        assert likes[0]["credits"] == "Regie: Brad Bird"
+
+    def test_reaction_without_a_live_event_has_no_credits(self, db: Session):
+        """EPG cleanup deletes old events; the snapshot fields survive it."""
+        user = make_user(db)
+        db.add(models.UserLike(user_id=user.id, epg_event_id=None, title="Alte Show",
+                               sentiment="like", created_at=utcnow()))
+        db.commit()
+        likes, _ = _get_recent_reactions(user.id, db)
+        assert likes[0]["credits"] == ""
+
+    def test_history_carries_the_credits(self, db: Session):
+        user = make_user(db)
+        ch = make_channel(db)
+        ev = make_event(db, ch, title="Death in Paradise",
+                        long_desc="Krimi. Darsteller: Don Gilet - Mervin Wilson Regie: Jemand")
+        make_session(db, user, ch, epg_event=ev)
+        db.commit()
+        history = _get_recent_history(user.id, db)
+        assert history[0]["credits"] == "Regie: Jemand Darsteller: Don Gilet - Mervin Wilson"
+
     def test_history_only_confirmed_recent(self, db: Session):
         user = make_user(db)
         ch = make_channel(db)
@@ -261,6 +352,40 @@ class TestProfileContext:
         db.commit()
         history = _get_recent_history(user.id, db)
         assert len(history) == 1
+
+
+# ── on-demand re-rate window ──────────────────────────────────────────────────
+
+class TestWindowEventIds:
+    def test_window_is_now_until_plus_hours(self, db: Session):
+        user = make_user(db)
+        ch = make_channel(db)
+        make_event(db, ch, title="läuft", offset_min=-30)                 # on air
+        make_event(db, ch, title="gleich", offset_min=60)                 # in window
+        make_event(db, ch, title="spaeter", offset_min=60 * 10)           # outside
+        make_event(db, ch, title="vorbei", offset_min=-600,
+                   duration_sec=60)                                       # already over
+        with patch("app.services.scoring.get_channels_for_user", return_value=[ch]):
+            ids = _window_event_ids(user.id, 4.0, db)
+        titles = {db.get(models.EpgEvent, i).title for i in ids}
+        assert titles == {"läuft", "gleich"}
+
+    def test_other_channels_are_not_in_the_window(self, db: Session):
+        user = make_user(db)
+        mine = make_channel(db, sref="1:0:1:1:1:1:0:0:0:0:", name="Meins")
+        other = make_channel(db, sref="1:0:2:2:2:2:0:0:0:0:", name="Fremd")
+        make_event(db, mine, title="meins", offset_min=30)
+        make_event(db, other, title="fremd", offset_min=30)
+        with patch("app.services.scoring.get_channels_for_user", return_value=[mine]):
+            ids = _window_event_ids(user.id, 4.0, db)
+        assert [db.get(models.EpgEvent, i).title for i in ids] == ["meins"]
+
+    def test_no_visible_channel_means_no_window(self, db: Session):
+        user = make_user(db)
+        ch = make_channel(db)
+        make_event(db, ch, offset_min=30)
+        with patch("app.services.scoring.get_channels_for_user", return_value=[]):
+            assert _window_event_ids(user.id, 4.0, db) == []
 
 
 # ── get_recommendations_from_scores ───────────────────────────────────────────

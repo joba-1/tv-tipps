@@ -15,6 +15,7 @@ time window.
 from __future__ import annotations
 import asyncio
 import json
+import re
 import time
 from collections import deque
 from datetime import timedelta
@@ -100,26 +101,72 @@ def _mark_ai_down() -> None:
 
 # ─── LLM scoring prompt ─────────────────────────────────────────────────────
 
-# Cap for the per-candidate EPG text. short_desc and long_desc are
+# Cap for the per-candidate synopsis. short_desc and long_desc are
 # complementary, not redundant: over 12 645 upcoming events only 6 % of the
 # long_desc values begin with the short_desc. The short one carries the
 # structured line ("Farbe im Spiel Scripted Reality, D 2018 Altersfreigabe:
-# ab 12"), the long one the synopsis. Joined length is p50 170 / p90 598 chars;
-# the tail beyond this cap is the credits block ("Regie: … Drehbuch: …
-# Darsteller: …"). For the ~10 % of long_desc values that carry one, the
-# "Regie:" line starts well before the cap (p90 at 484 chars), so the director
-# survives it. Measured: a 100-candidate batch costs 18 939 prompt tokens
-# instead of 9 754, and 44 s instead of 38 s.
+# ab 12"), the long one the synopsis. Joined length is p50 170 / p90 598 chars.
+# Measured: a 100-candidate batch costs 18 939 prompt tokens, 44 s.
 _CAND_DESC_MAX_CHARS = 600
 
+# The tail of long_desc is often a credits block ("Regie: … Drehbuch: …
+# Darsteller: …"). Director and cast are a strong taste signal, so this is the
+# one part the synopsis cap must not eat: the synopsis is capped, the credits
+# block keeps its own cap. Measured 2026-09-18 over 19 098 upcoming events:
+# 12.6 % carry such a block; of those, 5.5 % began beyond the old cap and were
+# lost entirely, the rest lost a median of 182 chars off the end — usually the
+# second half of the cast list. Block length is p50 218 / p90 428 chars.
+_CAND_CREDITS_MAX_CHARS = 600
+_CREDITS_RE = re.compile(
+    r"\b(Regie|Buch/Autor|Drehbuch|Darsteller|Moderation|Kamera|Musik|Komponist|Schnitt)\s*:")
+# Order in which the taste lines (likes/dislikes/history) quote the block: the
+# people that carry taste, not the crew.
+_CREDITS_PRIORITY = ("Regie", "Darsteller", "Moderation", "Buch/Autor", "Drehbuch")
+_CREDITS_LINE_MAX_CHARS = 120
 
-def _candidate_desc(ev: EpgEvent, limit: int = _CAND_DESC_MAX_CHARS) -> str:
-    """EPG text for one candidate: short_desc + long_desc, whitespace-collapsed
-    and capped. Either field may be missing (14 % of candidates have neither,
-    23 % no short_desc, 44 % no long_desc)."""
+
+def _epg_text(ev: EpgEvent) -> str:
+    """short_desc + long_desc, whitespace-collapsed. Either field may be missing
+    (14 % of candidates have neither, 23 % no short_desc, 44 % no long_desc)."""
     parts = [" ".join((ev.short_desc or "").split()),
              " ".join((ev.long_desc or "").split())]
-    return " ".join(p for p in parts if p)[:limit]
+    return " ".join(p for p in parts if p)
+
+
+def _split_credits(text: str) -> tuple[str, str]:
+    """(synopsis, credits). credits is "" when the text has no credits block."""
+    m = _CREDITS_RE.search(text)
+    if not m:
+        return text.strip(), ""
+    return text[:m.start()].strip(), text[m.start():].strip()
+
+
+def _credits_line(text: str, limit: int = _CREDITS_LINE_MAX_CHARS) -> str:
+    """Compact "Regie: X Darsteller: A, B" for the taste lines — labels in
+    _CREDITS_PRIORITY order, joined and capped. A block that names only crew
+    (Kamera, Musik …) yields "" — those say nothing about taste."""
+    _, block = _split_credits(text)
+    if not block:
+        return ""
+    parts = _CREDITS_RE.split(block)
+    seg: dict[str, str] = {}
+    for i in range(1, len(parts) - 1, 2):
+        seg.setdefault(parts[i], parts[i + 1])
+    out = " ".join(f"{label}: {' '.join(seg[label].split())}"
+                   for label in _CREDITS_PRIORITY if seg.get(label, "").strip())
+    return out[:limit].strip()
+
+
+def _candidate_desc(
+    ev: EpgEvent,
+    limit: int = _CAND_DESC_MAX_CHARS,
+    credits_limit: int = _CAND_CREDITS_MAX_CHARS,
+) -> str:
+    """EPG text for one candidate: the synopsis capped at `limit`, plus the
+    credits block, capped on its own — a long synopsis must never cost the model
+    the director or the cast."""
+    syn, cred = _split_credits(_epg_text(ev))
+    return " ".join(p for p in (syn[:limit], cred[:credits_limit]) if p)
 
 
 def _build_scoring_prompt(
@@ -137,15 +184,18 @@ def _build_scoring_prompt(
 
     hist_lines = [
         f"  - {h.get('title','?')} | {h.get('channel','?')} | {h.get('genre') or 'unbekannt'} | {h.get('duration_min',0):.0f} min"
+        + (f" | {h['credits']}" if h.get("credits") else "")
         for h in history   # already capped at _HISTORY_LIMIT by _get_recent_history
     ]
     hist_str = "\n".join(hist_lines) if hist_lines else "  (keine Historie)"
     likes_str = "\n".join(
         f"  - {l.get('title','?')} | {l.get('channel','?')} | {l.get('genre') or 'unbekannt'}"
+        + (f" | {l['credits']}" if l.get("credits") else "")
         for l in likes
     ) or "  (keine)"
     dislikes_str = "\n".join(
         f"  - {d.get('title','?')} | {d.get('channel','?')} | {d.get('genre') or 'unbekannt'}"
+        + (f" | {d['credits']}" if d.get("credits") else "")
         for d in dislikes
     ) or "  (keine)"
 
@@ -167,6 +217,7 @@ def _build_scoring_prompt(
 
 AUFGABE: Vergib pro nummerierter Sendung in der LISTE einen Match-Score 0.00–1.00 für {user_name}.
 1.00 = perfekt zum Profil. 0.00 = passt überhaupt nicht. 0.50 = neutral.
+Regie- und Darsteller-Namen sind ein starkes Signal: taucht ein Name aus den positiv bewerteten Titeln, der Sehhistorie oder den expliziten Vorlieben bei einer Sendung auf, spricht das deutlich für sie — und umgekehrt. Wenn das der Fall ist, nenne den Namen in der `reason` — nur dann, und nur Namen, die in der Sendung tatsächlich genannt sind; fehlende Übereinstimmungen nicht erwähnen.
 {prefs_section}
 NUTZERPROFIL ({profile.get('session_count', 0)} Sitzungen, letzte 30 Tage):
 - Lieblingsgenres: {genres_str or 'unbekannt'}
@@ -511,10 +562,24 @@ _HISTORY_LIMIT = 70
 _REACTION_LIMIT = 200
 
 
+def _events_by_id(ids: list[int], db: Session) -> dict[int, EpgEvent]:
+    """{id: event} for the events still present. Likes and sessions keep their
+    epg_event_id, but EPG cleanup deletes old events, so a miss is normal."""
+    ids = sorted({i for i in ids if i})
+    if not ids:
+        return {}
+    return {
+        ev.id: ev
+        for ev in db.query(EpgEvent).filter(EpgEvent.id.in_(ids)).all()
+    }
+
+
 def _get_recent_reactions(
     user_id: int, db: Session, limit: int = _REACTION_LIMIT,
 ) -> tuple[list[dict], list[dict]]:
-    """Return (likes, dislikes) as separate lists, most recent first."""
+    """Return (likes, dislikes) as separate lists, most recent first. Each entry
+    carries the credits of the rated event, so the model can connect a liked
+    film to its director/cast in the candidate list."""
     rows = (
         db.query(UserLike)
         .filter(UserLike.user_id == user_id)
@@ -522,9 +587,14 @@ def _get_recent_reactions(
         .limit(limit * 2)
         .all()
     )
+    events = _events_by_id([r.epg_event_id for r in rows], db)
     likes, dislikes = [], []
     for r in rows:
-        entry = {"title": r.title, "channel": r.channel_name or "?", "genre": r.genre}
+        ev = events.get(r.epg_event_id)
+        entry = {
+            "title": r.title, "channel": r.channel_name or "?", "genre": r.genre,
+            "credits": _credits_line(_epg_text(ev)) if ev else "",
+        }
         if r.sentiment == "dislike":
             if len(dislikes) < limit:
                 dislikes.append(entry)
@@ -556,6 +626,7 @@ def _get_recent_history(user_id: int, db: Session) -> list[dict]:
             "channel": ch.name if ch else "?",
             "genre": ev.genre if ev else None,
             "duration_min": (s.duration_sec or 0) / 60,
+            "credits": _credits_line(_epg_text(ev)) if ev else "",
         })
     return history
 
@@ -675,6 +746,57 @@ def _stale_future_event_ids(user_id: int, db: Session) -> list[int]:
         .all()
     )
     return [r[0] for r in rows]
+
+
+def _window_event_ids(user_id: int, hours: float, db: Session) -> list[int]:
+    """Event ids airing now or starting within `hours`, on the user's channels."""
+    now = utcnow()
+    ch_ids = {c.id for c in get_channels_for_user(user_id, db)}
+    if not ch_ids:
+        return []
+    rows = (
+        db.query(EpgEvent.id)
+        .filter(
+            EpgEvent.end_time > now,
+            EpgEvent.start_time < now + timedelta(hours=hours),
+            EpgEvent.channel_id.in_(ch_ids),
+        )
+        .all()
+    )
+    return [r[0] for r in rows]
+
+
+async def rerate_window(hours: float = 4.0, slugs: list[str] | None = None) -> list[dict]:
+    """Re-rate the next `hours` window for the given users (all if None), then
+    leave the rest of the future window to the 04:15 catch-all.
+
+    Runs as an asyncio task inside the app process on purpose: a separate process
+    would bypass the per-process Ollama semaphore in app/services/ollama.py, and
+    Ollama (-np 1, one runner slot) would spin up a second copy of the model next
+    to the first. Stale-marking happens *before* the window is scored, so the
+    failure mode of a restart mid-run is the benign one: the window is stale and
+    the nightly job picks it up.
+    """
+    db = SessionLocal()
+    out: list[dict] = []
+    try:
+        q = db.query(User)
+        if slugs:
+            q = q.filter(User.slug.in_(slugs))
+        for user in q.all():
+            ids = _window_event_ids(user.id, hours, db)
+            stale = mark_user_llm_rows_stale(user.id, except_event_id=None, db=db)
+            written = await _rerate_specific(user, ids, db) if ids else 0
+            log.info("scoring.rerate_window", user_id=user.id, hours=hours,
+                     window=len(ids), written=written, stale_marked=stale)
+            out.append({"user": user.slug, "window_events": len(ids),
+                        "written": written, "stale_marked": stale})
+    except Exception as e:
+        log.warning("scoring.rerate_window_failed", error=str(e))
+        raise
+    finally:
+        db.close()
+    return out
 
 
 async def _rerate_specific(user: User, event_ids: list[int], db: Session) -> int:

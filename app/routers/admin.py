@@ -1,3 +1,4 @@
+import asyncio
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -420,6 +421,29 @@ async def set_user_preferences(user: str, req: UserPreferencesRequest, db: Sessi
     mark_user_llm_rows_stale(u.id, except_event_id=None, db=db)
     schedule_rerate(u.id)
     return {"ok": True, "user": user}
+
+
+# ── On-demand re-rate ────────────────────────────────────────────────────────
+
+# Keeps a reference to the running task so it isn't garbage-collected mid-flight.
+_rerate_tasks: set[asyncio.Task] = set()
+
+
+@router.post("/api/admin/rerate-window")
+async def admin_rerate_window(hours: float = 4.0, user: str | None = None):
+    """Re-rate the programmes airing now or starting within `hours` — without
+    waiting for the nightly cron. Everything outside that window is marked stale
+    and re-rated by the 04:15 catch-all.
+
+    Runs as a background task in this process (shares the Ollama semaphore with
+    normal ingest scoring), so the response returns immediately.
+    """
+    from app.services.scoring import rerate_window as _rerate_window
+    hours = max(0.5, min(float(hours), 48.0))
+    t = asyncio.create_task(_rerate_window(hours=hours, slugs=[user] if user else None))
+    _rerate_tasks.add(t)
+    t.add_done_callback(_rerate_tasks.discard)
+    return {"ok": True, "hours": hours, "user": user or "all", "started": True}
 
 
 # ── User activity (sessions + likes/dislikes) ────────────────────────────────
