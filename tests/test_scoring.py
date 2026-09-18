@@ -147,6 +147,21 @@ class TestScoreChunk:
         assert all(t[3] == "rule" for t in triples)
 
     @pytest.mark.asyncio
+    @pytest.mark.asyncio
+    async def test_single_candidate_chunk_is_not_logged_as_constant(self, db: Session):
+        # index=1 in a one-entry list is the complete set 1..1, not a filler.
+        chunk = _chunk_of(db, 1)
+        raw = {"scores": [{"index": 1, "score": 0.7, "reason": "ok"}]}
+        usage = {"prompt_overflow": False, "completion_truncated": False}
+        with patch("app.services.scoring.ask_json", new_callable=AsyncMock, return_value=raw), \
+             patch("app.services.scoring._ollama.last_usage", return_value=usage), \
+             patch("app.services.scoring.log") as log_mock:
+            triples = await _score_chunk("Alice", {}, [], [], [], chunk)
+        assert triples == [(chunk[0][0].id, 0.7, "ok", "llm")]
+        assert not [c for c in log_mock.info.call_args_list
+                    if c.args and "index_constant" in str(c.args[0])]
+
+    @pytest.mark.asyncio
     async def test_valid_response_maps_positionally(self, db: Session):
         # No index in the response → the old positional matching still applies.
         chunk = _chunk_of(db, 2)

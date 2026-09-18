@@ -604,7 +604,7 @@ async def _score_chunk(
         idx = [i for i, _, _ in parsed]
         if all(i is None for i in idx):
             log.info("scoring.index_absent", chunk=len(chunk))
-        elif len(set(idx)) == 1:
+        elif len(set(idx)) == 1 and len(chunk) > 1:
             log.info("scoring.index_constant", chunk=len(chunk), index=idx[0])
         elif idx != list(range(1, len(chunk) + 1)):
             log.info("scoring.index_shuffled", chunk=len(chunk), indices=idx[:30])
