@@ -17,19 +17,21 @@ _TIMEOUT = httpx.Timeout(240.0)
 # can give temperature room for ranking variety without risking structure drift.
 # temperature=0.2 → still mostly deterministic on strong signals, lets ties between
 #                   similar-strength candidates break differently across calls.
-# num_ctx=16384   → prefix (~3,700) + 50-event LISTE (~2,500) + output (~1,400)
-#                    fits with ~9k headroom. VRAM cost ~2 GB KV cache extra vs
-#                    8192 — fine on the 16 GB GPU.
+# num_ctx          → NOT sent. The Ollama server on job6 sets one context for
+#                    every client (OLLAMA_CONTEXT_LENGTH=49152); a request with a
+#                    different num_ctx reloads the shared model for everyone
+#                    (~5 s). NUM_CTX mirrors that server value and is only used
+#                    for the usage/overflow accounting below.
 # num_predict=5000 → for batch=100, measured ~39 tokens/event under the schema
 #                    → ~3900 typical, 5000 leaves ~28 % headroom. Output gen
 #                    dominates wall time, so don't over-allocate (no extra cost
 #                    when unused but the cap protects against runaway responses).
-NUM_CTX = 16384
+NUM_CTX = 49152  # server default, see comment above — keep in sync
 NUM_PREDICT = 5000
 # Caller is overflowing when input alone exceeds ctx, or when the sum is within
 # this margin of ctx (Ollama silently truncates in either case).
 _CTX_SAFETY_MARGIN = 100
-_OPTIONS = {"num_ctx": NUM_CTX, "num_predict": NUM_PREDICT, "temperature": 0.2}
+_OPTIONS = {"num_predict": NUM_PREDICT, "temperature": 0.2}
 
 # Ollama serves one generation at a time per model; concurrent /api/generate
 # calls just queue server-side. Serialize on our side so a queued call doesn't

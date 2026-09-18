@@ -95,7 +95,7 @@ uvicorn main:app --reload --host 0.0.0.0 --port 8765
 - Translations: one-shot batch per new browser language, cached in the `translations` table. Curated `static/i18n/<lang>.json` always wins over AI entries.
 - If Ollama is unreachable the app logs `recs.llm_unavailable` / `i18n.batch_failed` and degrades gracefully — don't add retries or hard failures around it.
 - **Thinking models** (e.g. `qwen3.5:9b`) emit their JSON into the `thinking` field with `response=""` when `format=json` is set. `ask_json` falls back to `thinking` automatically — verify by checking `ollama.ok` events fire (not `ollama.parse_failed`).
-- **Context-usage monitoring**: every Ollama call logs `ollama.usage` with `caller`, `prompt_tokens`, `completion_tokens`, `num_ctx`, `ctx_used_pct`. Per-caller running min/avg/max/sum are exposed at `GET /api/admin/ollama-stats`; reset with `POST /api/admin/ollama-stats/reset`. Callers in use: `recs`, `i18n`. Stats reset on process restart.
+- **Context-usage monitoring**: every Ollama call logs `ollama.usage` with `caller`, `prompt_tokens`, `completion_tokens`, `num_ctx`, `ctx_used_pct` (num_ctx mirrors the server-wide `OLLAMA_CONTEXT_LENGTH`; it is never sent as a request option — a differing value would reload the shared model for every client). Per-caller running min/avg/max/sum are exposed at `GET /api/admin/ollama-stats`; reset with `POST /api/admin/ollama-stats/reset`. Callers in use: `recs`, `i18n`. Stats reset on process restart.
 
 ## Receiver power & remote
 
