@@ -22,16 +22,25 @@ _TIMEOUT = httpx.Timeout(240.0)
 #                    different num_ctx reloads the shared model for everyone
 #                    (~5 s). NUM_CTX mirrors that server value and is only used
 #                    for the usage/overflow accounting below.
-# num_predict=5000 → for batch=100, measured ~39 tokens/event under the schema
-#                    → ~3900 typical, 5000 leaves ~28 % headroom. Output gen
-#                    dominates wall time, so don't over-allocate (no extra cost
-#                    when unused but the cap protects against runaway responses).
+# num_predict=8000 → a runaway guard, not a budget. The model stops on its own
+#                    once the JSON is complete: measured 2026-09-18 with the cap
+#                    raised to 12000, a batch of 100 candidates finished at 4495
+#                    tokens and stopped there. The old 5000 sat right on top of
+#                    that though — 30 truncated answers in 7 days, each one
+#                    sending _score_chunk into its halve-and-retry path. An
+#                    unused cap costs nothing.
 NUM_CTX = 49152  # server default, see comment above — keep in sync
-NUM_PREDICT = 5000
+NUM_PREDICT = 8000
 # Caller is overflowing when input alone exceeds ctx, or when the sum is within
 # this margin of ctx (Ollama silently truncates in either case).
 _CTX_SAFETY_MARGIN = 100
-_OPTIONS = {"num_predict": NUM_PREDICT, "temperature": 0.2}
+# seed → the same batch scores the same way twice. Measured 2026-09-18: two
+# runs with an *identical* prompt averaged 0.20 and 0.39 over the same 100
+# events, per-event deviation 0.24 — the sampling noise was larger than any
+# prompt change we tested, so recommendations flipped between runs. temperature
+# stays: the JSON grammar already pins the shape, and the variety it adds is
+# inside a now-reproducible draw.
+_OPTIONS = {"num_predict": NUM_PREDICT, "temperature": 0.2, "seed": 42}
 
 # Ollama serves one generation at a time per model; concurrent /api/generate
 # calls just queue server-side. Serialize on our side so a queued call doesn't

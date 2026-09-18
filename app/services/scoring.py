@@ -36,10 +36,11 @@ log = get_logger(__name__)
 
 # How many events we send the LLM in a single batch. The JSON-Schema grammar
 # enforces exactly N entries, so the previous mismatch concern is gone — fewer
-# larger batches now win on overhead (the ~2400-token user prefix is re-eval'd
-# once per call). At batch=100: prompt ~7600 (~46 % of ctx), output ~3900.
+# larger batches now win on overhead (the user prefix is re-eval'd once per
+# call). Measured 2026-09-18 at batch=100 with the full EPG text: 18 939 prompt
+# + 4 495 output tokens = 48 % of the 49 152-token context, 44 s per batch.
 # Output generation dominates wall time, so going much larger has diminishing
-# returns — savings beyond ~100 are < 5 % per doubling.
+# returns.
 _BATCH_SIZE = 100
 # Score threshold above which a match is "good" enough to show as a badge in
 # EPG / Now & Next lists. Below this we return None so the UI hides the chip.
@@ -99,6 +100,28 @@ def _mark_ai_down() -> None:
 
 # ─── LLM scoring prompt ─────────────────────────────────────────────────────
 
+# Cap for the per-candidate EPG text. short_desc and long_desc are
+# complementary, not redundant: over 12 645 upcoming events only 6 % of the
+# long_desc values begin with the short_desc. The short one carries the
+# structured line ("Farbe im Spiel Scripted Reality, D 2018 Altersfreigabe:
+# ab 12"), the long one the synopsis. Joined length is p50 170 / p90 598 chars;
+# the tail beyond this cap is the credits block ("Regie: … Drehbuch: …
+# Darsteller: …"). For the ~10 % of long_desc values that carry one, the
+# "Regie:" line starts well before the cap (p90 at 484 chars), so the director
+# survives it. Measured: a 100-candidate batch costs 18 939 prompt tokens
+# instead of 9 754, and 44 s instead of 38 s.
+_CAND_DESC_MAX_CHARS = 600
+
+
+def _candidate_desc(ev: EpgEvent, limit: int = _CAND_DESC_MAX_CHARS) -> str:
+    """EPG text for one candidate: short_desc + long_desc, whitespace-collapsed
+    and capped. Either field may be missing (14 % of candidates have neither,
+    23 % no short_desc, 44 % no long_desc)."""
+    parts = [" ".join((ev.short_desc or "").split()),
+             " ".join((ev.long_desc or "").split())]
+    return " ".join(p for p in parts if p)[:limit]
+
+
 def _build_scoring_prompt(
     user_name: str, profile: dict,
     history: list[dict], likes: list[dict], dislikes: list[dict],
@@ -114,7 +137,7 @@ def _build_scoring_prompt(
 
     hist_lines = [
         f"  - {h.get('title','?')} | {h.get('channel','?')} | {h.get('genre') or 'unbekannt'} | {h.get('duration_min',0):.0f} min"
-        for h in history[:40]
+        for h in history   # already capped at _HISTORY_LIMIT by _get_recent_history
     ]
     hist_str = "\n".join(hist_lines) if hist_lines else "  (keine Historie)"
     likes_str = "\n".join(
@@ -129,7 +152,7 @@ def _build_scoring_prompt(
     cand_lines = []
     for i, (ev, ch) in enumerate(events):
         dur_min = (ev.duration_sec or 0) // 60
-        desc = (ev.short_desc or "").replace("\n", " ").strip()[:80]
+        desc = _candidate_desc(ev)
         desc_part = f" | {desc}" if desc else ""
         cand_lines.append(
             f"  [{i+1}] {ch.name} | {ev.title} | "
@@ -477,10 +500,15 @@ async def _score_chunk(
     return triples
 
 
-# Prompt-context limits — sized so the user prefix (profile + history +
-# reactions) stays around ~2400 tokens of the scoring prompt.
+# Prompt-context limits. These were sized when the whole prompt had to fit in
+# 4096 tokens; with the server-wide 48k context (see app/services/ollama.py) the
+# binding constraint is gone, and a cap that silently drops the user's own
+# explicit signals costs more than the tokens it saves. Measured 2026-09-18 on
+# the heaviest account: 76 likes in the DB, 52 in the prompt — and the ones cut
+# were the 24 *oldest* (most_recent_first), i.e. exactly those that have defined
+# the taste longest. Raised to 200: the full reaction list is ~4.5k tokens.
 _HISTORY_LIMIT = 70
-_REACTION_LIMIT = 52
+_REACTION_LIMIT = 200
 
 
 def _get_recent_reactions(

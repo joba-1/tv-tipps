@@ -48,6 +48,8 @@ def make_event(
     genre: str | None = "Drama",
     duration_sec: int = 3600,
     offset_min: int = -30,  # minutes from now; negative = already started
+    short_desc: str | None = None,
+    long_desc: str | None = None,
 ) -> models.EpgEvent:
     now = _now()
     start = now + timedelta(minutes=offset_min)
@@ -59,6 +61,8 @@ def make_event(
         end_time=end,
         duration_sec=duration_sec,
         genre=genre,
+        short_desc=short_desc,
+        long_desc=long_desc,
         cached_at=now,
     )
     db.add(ev)

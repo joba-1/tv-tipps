@@ -6,6 +6,7 @@ from unittest.mock import AsyncMock, patch
 from sqlalchemy.orm import Session
 from app import models
 from app.services.scoring import (
+    _candidate_desc, _build_scoring_prompt, _CAND_DESC_MAX_CHARS,
     _parse_scoring_response, _rule_score, _score_chunk, _upsert_scores,
     good_scores_for_events, set_explicit_score, clear_explicit_score,
     mark_user_llm_rows_stale, _stale_future_event_ids,
@@ -181,6 +182,47 @@ class TestScorePersistence:
         assert db.get(models.UserEventScore, (user.id, ev.id)) is None
 
 
+# ── candidate EPG text ────────────────────────────────────────────────────────
+
+class TestCandidateDesc:
+    def test_joins_both_fields(self, db: Session):
+        """short_desc is the structured line, long_desc the synopsis — the model
+        needs both (they differ in 94 % of cases)."""
+        ch = make_channel(db)
+        ev = make_event(db, ch, short_desc="Scripted Reality, D 2018",
+                        long_desc="Zwei Maler werden beschuldigt.")
+        assert _candidate_desc(ev) == "Scripted Reality, D 2018 Zwei Maler werden beschuldigt."
+
+    def test_only_one_field_present(self, db: Session):
+        ch = make_channel(db)
+        assert _candidate_desc(make_event(db, ch, long_desc="Nur lang")) == "Nur lang"
+        assert _candidate_desc(make_event(db, ch, short_desc="Nur kurz")) == "Nur kurz"
+        assert _candidate_desc(make_event(db, ch)) == ""
+
+    def test_whitespace_collapsed(self, db: Session):
+        ch = make_channel(db)
+        ev = make_event(db, ch, short_desc="  Titel\n\nmit Umbruch  ", long_desc="Inhalt\t hier")
+        assert _candidate_desc(ev) == "Titel mit Umbruch Inhalt hier"
+
+    def test_capped(self, db: Session):
+        ch = make_channel(db)
+        ev = make_event(db, ch, short_desc="x" * 400, long_desc="y" * 400)
+        out = _candidate_desc(ev)
+        assert len(out) == _CAND_DESC_MAX_CHARS
+        assert out.startswith("x" * 100)  # the structured line survives the cap
+        assert "y" in out
+
+
+class TestBuildScoringPrompt:
+    def test_carries_both_epg_fields(self, db: Session):
+        ch = make_channel(db)
+        ev = make_event(db, ch, title="Kraven",
+                        short_desc="Marvel-Actioner, USA 2024",
+                        long_desc="Sergei Kravinoff findet in der Natur seinen Frieden.")
+        prompt = _build_scoring_prompt("Alice", {}, [], [], [], [(ev, ch)])
+        assert "Marvel-Actioner, USA 2024 Sergei Kravinoff" in prompt
+
+
 # ── profile context helpers ───────────────────────────────────────────────────
 
 class TestProfileContext:
@@ -195,6 +237,20 @@ class TestProfileContext:
         likes, dislikes = _get_recent_reactions(user.id, db)
         assert [l["title"] for l in likes] == ["Good"]
         assert [d["title"] for d in dislikes] == ["Bad"]
+
+    def test_reactions_are_not_capped_at_52(self, db: Session):
+        """Regression guard: the cap used to be 52, which silently dropped the
+        24 oldest likes of the heaviest account — i.e. the ones that defined the
+        taste longest."""
+        user = make_user(db)
+        now = utcnow()
+        for i in range(60):
+            db.add(models.UserLike(user_id=user.id, title=f"Show {i}",
+                                   sentiment="like", created_at=now))
+        db.commit()
+        likes, dislikes = _get_recent_reactions(user.id, db)
+        assert len(likes) == 60
+        assert dislikes == []
 
     def test_history_only_confirmed_recent(self, db: Session):
         user = make_user(db)
