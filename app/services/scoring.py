@@ -7,6 +7,8 @@ Background workflow:
   - like/dislike   → explicit override + debounced background re-rate
   - prefs/sessions → stale-mark + debounced re-rate
   - daily cron     → catch-all re-rate of remaining stale rows
+  - LLM window     → outside settings.llm_window_* only events airing before
+                     it opens reach the LLM, the rest waits for the night
 
 The HTTP recommendations endpoint never calls the LLM directly — it just reads
 match_score from this table, ordered by score within the requested context's
@@ -30,7 +32,7 @@ from app.services.profile import get_profile
 from app.services.channels import get_channels_for_user
 from app.services.ollama import ask_json
 from app.services import ollama as _ollama
-from app.timezones import utcnow, to_local_str
+from app.timezones import utcnow, to_local_str, llm_horizon
 from app.logging_setup import get_logger
 
 log = get_logger(__name__)
@@ -474,6 +476,45 @@ def _global_pending(db: Session, just_written: int) -> int:
     return cnt
 
 
+# ─── LLM window ─────────────────────────────────────────────────────────────
+
+def _defer_to_llm_window(
+    user_id: int, rows: list[tuple[EpgEvent, Channel]], db: Session,
+) -> list[tuple[EpgEvent, Channel]]:
+    """Return the rows the LLM may score now (see settings.llm_window_*).
+    A deferred event without any row gets a rule score, so recommendations
+    have something to rank until the window; one with a row — typically a
+    stale LLM score — keeps it, which beats replacing it with a rule guess.
+    Inside the window the watcher upgrades the rule rows and the 04:15
+    catch-all re-rates the stale ones. Both go through here too, so a run
+    still going when the window closes stops by itself."""
+    horizon = llm_horizon()
+    if horizon is None:
+        return rows
+    now_rows = [(ev, ch) for ev, ch in rows if ev.start_time < horizon]
+    later = [(ev, ch) for ev, ch in rows if ev.start_time >= horizon]
+    if not later:
+        return now_rows
+    have = {
+        r[0] for r in db.query(UserEventScore.epg_event_id).filter(
+            UserEventScore.user_id == user_id,
+            UserEventScore.epg_event_id.in_([ev.id for ev, _ in later]),
+        ).all()
+    }
+    fresh = [(ev.id, _rule_score(ev, ch), None, "rule")
+             for ev, ch in later if ev.id not in have]
+    _upsert_scores(user_id, fresh, db)
+    log.info("scoring.deferred_to_window", user_id=user_id,
+             deferred=len(later), rule_rows=len(fresh), scoring_now=len(now_rows))
+    return now_rows
+
+
+def _before_llm_horizon(q):
+    """Restrict an EpgEvent query to what the LLM may score right now."""
+    horizon = llm_horizon()
+    return q if horizon is None else q.filter(EpgEvent.start_time < horizon)
+
+
 # ─── Public scoring entry points ────────────────────────────────────────────
 
 async def score_events_for_user(
@@ -489,6 +530,7 @@ async def score_events_for_user(
     rows = _events_with_channels(pending, db)
     # Skip events on channels the user doesn't see at all.
     rows = [(ev, ch) for ev, ch in rows if ch.id in user_channel_ids]
+    rows = _defer_to_llm_window(user.id, rows, db)
     if not rows:
         return 0
 
@@ -877,6 +919,7 @@ async def _rerate_specific(user: User, event_ids: list[int], db: Session) -> int
         return 0
     user_channel_ids = {c.id for c in get_channels_for_user(user.id, db)}
     rows = [(ev, ch) for ev, ch in rows if ch.id in user_channel_ids]
+    rows = _defer_to_llm_window(user.id, rows, db)
     if not rows:
         return 0
     profile = get_profile(user.id, db)
@@ -987,24 +1030,24 @@ async def ai_availability_watcher() -> None:
 def _users_with_rule_rows(db: Session) -> list[int]:
     """Users with rule-scored rows on still-future events. Past rule rows are
     irrelevant — they won't be re-rated, so they must not keep the watcher
-    armed and probing Ollama every 90 s for nothing."""
+    armed and probing Ollama every 90 s for nothing. The same goes for rows
+    deferred to the LLM window: outside it, the probe alone would load the
+    model."""
     now = utcnow()
-    rows = (
+    rows = _before_llm_horizon(
         db.query(UserEventScore.user_id)
         .join(EpgEvent, EpgEvent.id == UserEventScore.epg_event_id)
         .filter(
             UserEventScore.source == "rule",
             EpgEvent.end_time > now,
         )
-        .distinct()
-        .all()
-    )
+    ).distinct().all()
     return [r[0] for r in rows]
 
 
 def _rule_future_event_ids(user_id: int, db: Session) -> list[int]:
     now = utcnow()
-    rows = (
+    rows = _before_llm_horizon(
         db.query(UserEventScore.epg_event_id)
         .join(EpgEvent, EpgEvent.id == UserEventScore.epg_event_id)
         .filter(
@@ -1012,8 +1055,7 @@ def _rule_future_event_ids(user_id: int, db: Session) -> list[int]:
             UserEventScore.source == "rule",
             EpgEvent.end_time > now,
         )
-        .all()
-    )
+    ).all()
     return [r[0] for r in rows]
 
 

@@ -14,6 +14,7 @@ from app.services.scoring import (
     mark_user_llm_rows_stale, _stale_future_event_ids,
     _get_recent_history, _get_recent_reactions,
     get_recommendations_from_scores, GOOD_MATCH_THRESHOLD,
+    _defer_to_llm_window, _users_with_rule_rows, _rule_future_event_ids,
 )
 from app.timezones import utcnow
 from tests.conftest import make_channel, make_event, make_user, make_session
@@ -263,6 +264,54 @@ class TestScoreChunk:
         assert calls == [14, 7, 7]
         assert len(triples) == 14
         assert all(t[3] == "llm" for t in triples)
+
+
+# ── LLM window: defer what can wait until the night ──────────────────────────
+
+class TestDeferToLlmWindow:
+    @pytest.fixture
+    def outside_window(self):
+        horizon = utcnow() + timedelta(hours=2)
+        with patch("app.services.scoring.llm_horizon", return_value=horizon):
+            yield horizon
+
+    def _setup(self, db):
+        user = make_user(db)
+        ch = make_channel(db)
+        soon = make_event(db, ch, title="Heute", offset_min=30)
+        later = make_event(db, ch, title="Morgen", offset_min=5 * 60)
+        db.commit()
+        return user, ch, soon, later
+
+    def test_inside_window_passes_everything(self, db: Session):
+        user, ch, soon, later = self._setup(db)
+        rows = [(soon, ch), (later, ch)]
+        with patch("app.services.scoring.llm_horizon", return_value=None):
+            assert _defer_to_llm_window(user.id, rows, db) == rows
+        assert db.get(models.UserEventScore, (user.id, later.id)) is None
+
+    def test_later_event_without_row_gets_rule_score(self, db: Session, outside_window):
+        user, ch, soon, later = self._setup(db)
+        assert _defer_to_llm_window(user.id, [(soon, ch), (later, ch)], db) == [(soon, ch)]
+        row = db.get(models.UserEventScore, (user.id, later.id))
+        assert row.source == "rule" and row.stale is False
+        assert db.get(models.UserEventScore, (user.id, soon.id)) is None
+
+    def test_later_event_keeps_its_stale_llm_row(self, db: Session, outside_window):
+        user, ch, soon, later = self._setup(db)
+        _upsert_scores(user.id, [(later.id, 0.9, "alt", "llm")], db)
+        mark_user_llm_rows_stale(user.id, except_event_id=None, db=db)
+        assert _defer_to_llm_window(user.id, [(later, ch)], db) == []
+        row = db.get(models.UserEventScore, (user.id, later.id))
+        assert (row.source, row.match_score, row.stale) == ("llm", pytest.approx(0.9), True)
+
+    def test_watcher_ignores_deferred_rule_rows(self, db: Session, outside_window):
+        user, ch, soon, later = self._setup(db)
+        _upsert_scores(user.id, [(later.id, 0.4, None, "rule")], db)
+        assert _users_with_rule_rows(db) == []
+        _upsert_scores(user.id, [(soon.id, 0.4, None, "rule")], db)
+        assert _users_with_rule_rows(db) == [user.id]
+        assert _rule_future_event_ids(user.id, db) == [soon.id]
 
 
 # ── score persistence helpers ─────────────────────────────────────────────────

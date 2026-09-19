@@ -64,6 +64,24 @@ def prime_range() -> tuple[datetime, datetime]:
     )
 
 
+def llm_horizon(now_local: datetime | None = None) -> datetime | None:
+    """Naive UTC cut-off for LLM scoring right now: None inside the LLM window
+    or when no window is configured, otherwise the moment the window next
+    opens. Events starting before the cut-off cannot wait for the window."""
+    start, end = settings.llm_window_start_hour, settings.llm_window_end_hour
+    if start == end:
+        return None
+    now_local = now_local or datetime.now(_tz())
+    h = now_local.hour
+    inside = start <= h < end if start < end else (h >= start or h < end)
+    if inside:
+        return None
+    opens = now_local.replace(hour=start, minute=0, second=0, microsecond=0)
+    if opens <= now_local:
+        opens += timedelta(days=1)
+    return opens.astimezone(timezone.utc).replace(tzinfo=None)
+
+
 def today_remaining_range() -> tuple[datetime, datetime]:
     """Return (now, next 04:00 local) in naive UTC. "Today" deliberately runs
     past midnight — a late film starting at 23:50 belongs to this evening, and

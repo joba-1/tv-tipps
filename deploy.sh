@@ -127,6 +127,13 @@ TIMEZONE=Europe/Berlin
 PRIME_START_HOUR=20
 PRIME_END_HOUR=23
 
+# ── LLM window ───────────────────────────────────────────────────────────────
+# Local hours [start, end). Outside them only programmes airing before the
+# window opens are scored by the LLM; the rest waits for the night. Equal
+# values = no window (LLM around the clock), e.g. 3 and 6 for 03:00-06:00.
+LLM_WINDOW_START_HOUR=0
+LLM_WINDOW_END_HOUR=0
+
 # ── IntertechnoGateway (optional — only for power_method=intertechno) ─────────
 #INTERTECHNO_URL=http://intertechnogw
 #INTERTECHNO_FAMILY=A

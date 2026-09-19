@@ -108,6 +108,16 @@ class Settings(BaseSettings):
     prime_start_hour: int = 20
     prime_end_hour: int = 23
 
+    # LLM window (local hours, [start, end), may wrap midnight). Ollama on job6
+    # is shared, so the bulk scoring runs at night: outside the window only
+    # events airing before it next opens go to the LLM — same-day EPG
+    # arrivals, 5-30 % of the rows on a normal day (measured 2026-09-19).
+    # Everything later gets a rule score, or keeps its stale LLM row, and is
+    # picked up inside the window by the 03:30 sweep, the 04:15 catch-all and
+    # the rule-upgrade watcher. start == end disables the gate.
+    llm_window_start_hour: int = 0
+    llm_window_end_hour: int = 0
+
     # IntertechnoGateway for mains-switched receivers (manual web control only)
     intertechno_url: str = ""     # e.g. http://intertechnogw
     intertechno_family: str = ""  # RF family letter, e.g. "A"

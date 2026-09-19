@@ -4,6 +4,7 @@ import pytest
 from app.timezones import (
     utcnow, from_timestamp, to_local_str,
     prime_range, tonight_range, today_remaining_range, hours_range,
+    llm_horizon,
 )
 from config import settings
 
@@ -125,3 +126,45 @@ class TestHoursRange:
     def test_end_is_start_plus_hours(self):
         start, end = hours_range(4)
         assert abs((end - start).total_seconds() - 4 * 3600) < 2
+
+
+class TestLlmHorizon:
+    @staticmethod
+    def _local(h, m=0):
+        from zoneinfo import ZoneInfo
+        return datetime(2026, 9, 19, h, m, tzinfo=ZoneInfo("Europe/Berlin"))
+
+    @pytest.fixture
+    def window(self, monkeypatch):
+        def set_(start, end):
+            monkeypatch.setattr(settings, "llm_window_start_hour", start)
+            monkeypatch.setattr(settings, "llm_window_end_hour", end)
+        return set_
+
+    def test_disabled_when_start_equals_end(self, window):
+        window(0, 0)
+        assert llm_horizon(self._local(21)) is None
+
+    def test_none_inside_window(self, window):
+        window(3, 6)
+        assert llm_horizon(self._local(3)) is None
+        assert llm_horizon(self._local(5, 59)) is None
+
+    def test_evening_points_to_next_night(self, window):
+        window(3, 6)
+        # 2026-09-20 03:00 CEST = 01:00 UTC
+        assert llm_horizon(self._local(21)) == datetime(2026, 9, 20, 1, 0)
+
+    def test_after_midnight_points_to_same_night(self, window):
+        window(3, 6)
+        assert llm_horizon(self._local(1, 30)) == datetime(2026, 9, 19, 1, 0)
+
+    def test_end_hour_is_exclusive(self, window):
+        window(3, 6)
+        assert llm_horizon(self._local(6)) == datetime(2026, 9, 20, 1, 0)
+
+    def test_window_wrapping_midnight(self, window):
+        window(23, 2)
+        assert llm_horizon(self._local(23, 30)) is None
+        assert llm_horizon(self._local(1)) is None
+        assert llm_horizon(self._local(12)) == datetime(2026, 9, 19, 21, 0)

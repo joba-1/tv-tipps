@@ -130,6 +130,10 @@ TIMEZONE=Europe/Berlin
 PRIME_START_HOUR=20          # local hour (inclusive)
 PRIME_END_HOUR=23            # local hour (exclusive)
 
+# ── LLM window ───────────────────────────────────────────────────────────────
+LLM_WINDOW_START_HOUR=0      # local hour (inclusive); equal to END = no window
+LLM_WINDOW_END_HOUR=0        # local hour (exclusive); e.g. 3 / 6 on job6
+
 # ── IntertechnoGateway (optional) ────────────────────────────────────────────
 # Only needed if a receiver uses power_method=intertechno.
 INTERTECHNO_URL=http://intertechnogw
@@ -408,6 +412,7 @@ journalctl -u tv-tipps -f | python3 -m json.tool
 | 0.5.0 | AI recommendation improvements: short_desc in prompt, likes signal, stated preferences bypass cold-start |
 | 1.0.0 | Like button, EPG search, admin preferences UI, receiver location in toasts |
 | 1.0.1 | Nav icons, watch toast shows room name, admin Save button disabled when unchanged; deploy.sh; full test suite |
+| 2.7.0 | LLM-Zeitfenster `LLM_WINDOW_START_HOUR`/`LLM_WINDOW_END_HOUR` (job6: 03–06 Uhr, Ollama wird geteilt). Außerhalb bewertet das LLM nur Sendungen, die vor Fensterbeginn laufen (5–30 % der Zeilen an einem normalen Tag); spätere bekommen einen Regel-Score oder behalten ihre stale LLM-Zeile. Im Fenster holen Watcher (Regel→LLM), 03:30-Sweep und 04:15-Catch-all alles nach; ein Lauf über das Fensterende hinaus stoppt von selbst. Der Watcher prüft außerhalb nur dringende Regel-Zeilen, damit keine Probe das Modell lädt |
 | 2.6.0 | Antwort-Schema verlangt pro Eintrag einen `index` (Nummer aus der Kandidatenliste). Bisher sicherte die Grammatik nur die *Anzahl* der Einträge, nicht die Zuordnung: eine doppelt beantwortete und eine übersprungene Sendung erfüllte das Schema und verschob still jeden weiteren Score auf die falsche Sendung. `_align_to_chunk` sortiert bei vollständiger Indexmenge `1..n` (auch wenn das Modell die Reihenfolge ändert), bleibt bei fehlendem oder konstantem Index bei der positionsweisen Zuordnung wie bisher und behandelt nur eine widersprüchliche Menge als nicht zuordenbar (halve/retry, sonst Regel-Score) |
 | 2.5.0 | Regie/Darsteller als Geschmackssignal: der Credits-Block eines EPG-Texts wird nicht mehr vom Synopsen-Cap abgeschnitten (eigener Cap), Likes/Dislikes/Historie tragen Regie und Besetzung mit, plus Prompt-Hinweis darauf; neuer Endpunkt `/api/admin/rerate-window` bewertet ein Zeitfenster sofort neu (läuft im App-Prozess, teilt das Ollama-Semaphore) und lässt den Rest für den 04:15-Cron stehen |
 | 2.4.0 | Scoring prompt: short_desc + long_desc joined and capped at 600 chars, reaction cap 52 → 200 (was dropping the oldest likes), fixed `seed` so a re-rate of the same batch is reproducible, `num_predict` 5000 → 8000 (the old cap cut one batch a day into a halve-and-retry), history no longer double-capped at 40 |
