@@ -37,12 +37,13 @@ The script installs the app, creates a Python venv, writes a config template, in
 ### Options
 
 ```
-sudo ./deploy.sh [--prefix DIR] [--port PORT] [--user USER]
+sudo ./deploy.sh [--prefix DIR] [--host ADDR] [--port PORT] [--user USER]
 ```
 
 | Option | Default | Description |
 |--------|---------|-------------|
 | `--prefix DIR` | `/usr/local` | Install root; app lands in `$PREFIX/lib/tv-tipps/` |
+| `--host ADDR` | `127.0.0.1` | Bind address. Loopback only, because Apache in front does TLS and the Authelia login; with `0.0.0.0` anyone on the LAN reaches the app without logging in. Use that only on a box without a reverse proxy. |
 | `--port PORT` | `8120` | Listening port. On job6 the public port 8844 belongs to Apache (TLS + Authelia), which proxies to `127.0.0.1:8120` — deploying with `--port 8844` makes the app fail to bind. |
 | `--user USER` | current sudo user | OS user that owns and runs the service |
 
@@ -64,7 +65,7 @@ sudo ./deploy.sh --prefix /opt --port 8765 --user myuser
 
 1. Edit `/etc/tv-tipps/env` — set your receiver IPs, usernames, and Ollama model
 2. `sudo systemctl restart tv-tipps`
-3. Open `http://<host>:8120/` (on job6 publicly: `https://banzhaf.chickenkiller.com:8844/` via Apache)
+3. Open the Apache URL (job6: `https://banzhaf.chickenkiller.com:8844/`). The app itself listens on `127.0.0.1:8120` only; deploy with `--host 0.0.0.0` to open `http://<host>:8120/` directly.
 
 ### Updating
 
@@ -180,7 +181,7 @@ Type=simple
 User=myuser
 WorkingDirectory=/usr/local/lib/tv-tipps
 EnvironmentFile=/etc/tv-tipps/env
-ExecStart=/usr/local/lib/tv-tipps/.venv/bin/uvicorn main:app --host 0.0.0.0 --port 8120
+ExecStart=/usr/local/lib/tv-tipps/.venv/bin/uvicorn main:app --host 127.0.0.1 --port 8120
 Restart=on-failure
 RestartSec=5
 

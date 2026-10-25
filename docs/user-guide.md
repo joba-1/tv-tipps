@@ -7,11 +7,13 @@ It learns your viewing habits and surfaces the programmes you are most likely to
 
 ## Getting started
 
-Open the app in any browser on your home network:
+Open the app in any browser, at home or on the road:
 
-http://<server-address>:8120          # at home
-https://banzhaf.chickenkiller.com:8844  # from anywhere, with login
 ```
+https://banzhaf.chickenkiller.com:8844
+```
+
+You log in once (Authelia), then pick your profile.
 
 On your first visit the app automatically detects your browser language (German, English, or other).
 If your language isn't available yet, the UI stays in German while a translation is being prepared in the background — typically ready within a minute.

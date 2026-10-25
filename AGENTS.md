@@ -50,8 +50,9 @@ Run tests + a quick curl before declaring backend changes done. UI changes need 
 
 ```bash
 sudo ./deploy.sh                                  # idempotent install/upgrade; never overwrites /etc/tv-tipps/env
-                                                  # default port 8120: job6's Apache owns 8844 (public TLS+Authelia) and proxies to it
+                                                  # default 127.0.0.1:8120: job6's Apache owns 8844 (public TLS+Authelia) and proxies to it
 sudo ./deploy.sh --prefix /opt --port 8765 --user me
+sudo ./deploy.sh --host 0.0.0.0                   # reachable on the LAN without Apache (no login!)
 sudo ./undeploy.sh                                # remove tv-tipps; keeps DB
 sudo ./undeploy.sh --purge-db                     # also remove /var/lib/tv-tipps
 sudo ./undeploy.sh --legacy --purge-db            # remove pre-rename tv-tips install

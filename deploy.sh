@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # deploy.sh — install tv-tipps as a systemd service
 #
-# Usage: sudo ./deploy.sh [--prefix DIR] [--port PORT] [--user USER]
+# Usage: sudo ./deploy.sh [--prefix DIR] [--host ADDR] [--port PORT] [--user USER]
 #   --prefix DIR   install root (default: /usr/local)
+#   --host   ADDR  bind address    (default: 127.0.0.1 — Apache in front does TLS + login)
 #   --port   PORT  listening port  (default: 8120)
 #   --user   USER  service user    (default: current user)
 #
@@ -16,6 +17,7 @@ set -euo pipefail
 
 # ── defaults ──────────────────────────────────────────────────────────────────
 PREFIX=/usr/local
+HOST=127.0.0.1
 PORT=8120
 SERVICE_USER=${SUDO_USER:-$(id -un)}
 
@@ -23,10 +25,11 @@ SERVICE_USER=${SUDO_USER:-$(id -un)}
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --prefix) PREFIX="$2"; shift 2 ;;
+        --host)   HOST="$2";   shift 2 ;;
         --port)   PORT="$2";   shift 2 ;;
         --user)   SERVICE_USER="$2"; shift 2 ;;
         -h|--help)
-            sed -n '2,10p' "$0"
+            sed -n '2,11p' "$0"
             exit 0 ;;
         *) echo "Unknown argument: $1" >&2; exit 1 ;;
     esac
@@ -55,6 +58,7 @@ fi
 echo "==> tv-tipps v${VERSION} deploy"
 echo "    prefix : $APP_DIR"
 echo "    port   : $PORT"
+echo "    host   : $HOST"
 echo "    user   : $SERVICE_USER"
 echo "    data   : $DATA_DIR"
 echo "    config : $ENV_FILE"
@@ -170,7 +174,7 @@ Type=simple
 User=$SERVICE_USER
 WorkingDirectory=$APP_DIR
 EnvironmentFile=$ENV_FILE
-ExecStart=$APP_DIR/.venv/bin/uvicorn main:app --host 0.0.0.0 --port $PORT
+ExecStart=$APP_DIR/.venv/bin/uvicorn main:app --host $HOST --port $PORT
 SyslogIdentifier=tv-tipps
 Restart=on-failure
 RestartSec=5
@@ -237,10 +241,10 @@ echo "     - Optionally set INTERTECHNO_URL if using an RF power switch"
 echo "  2. Restart after config changes:"
 echo "     sudo systemctl restart tv-tipps"
 echo "  3. Open in browser:"
-echo "     http://$(hostname -I | awk '{print $1}'):${PORT}/"
+echo "     http://${HOST}:${PORT}/  (behind Apache: its public URL)"
 echo "  4. Check logs:"
 echo "     journalctl -u tv-tipps -f"
 echo "     journalctl -u tv-tipps-report      # the morning EPG report"
 echo "     systemctl list-timers tv-tipps-report.timer"
 echo "  5. Update later:"
-echo "     cd $SCRIPT_DIR && git pull && sudo ./deploy.sh --prefix $PREFIX --port $PORT --user $SERVICE_USER"
+echo "     cd $SCRIPT_DIR && git pull && sudo ./deploy.sh --prefix $PREFIX --host $HOST --port $PORT --user $SERVICE_USER"
