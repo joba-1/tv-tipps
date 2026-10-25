@@ -537,11 +537,22 @@ button.close { background: none; border: none; font-size: 1.2rem; padding: 0; cu
 .dpad-right { grid-column: 3; grid-row: 2; }
 .dpad-down  { grid-column: 2; grid-row: 3; }
 
+/* Mirrors .remote-mid: side buttons as wide as .remote-vcol, the middle three
+   on the d-pad's column grid, so they line up under VOL / ◀ OK ▶ / CH. */
 .remote-nav-row {
   display: flex;
-  gap: 0.5rem;
+  gap: 1rem;
+  align-items: center;
+  justify-content: center;
 }
-.remote-nav-row .remote-btn { flex: 1; }
+.remote-nav-side { width: 68px; flex-shrink: 0; }
+.remote-nav-mid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 0.35rem;
+  width: 140px;
+  flex-shrink: 0;
+}
 
 .remote-color-row {
   display: flex;
