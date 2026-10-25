@@ -128,7 +128,8 @@ A virtual remote control for the selected receiver:
 - Power on / standby
 - Volume, channel up/down
 - D-pad navigation (up/down/left/right/OK)
-- Info, Menu, Back
+- Menu, Exit
+- Play, Pause, Stop (timeshift: Pause starts it, Play resumes, Stop returns to live)
 - Live screenshot (refreshed on demand)
 
 ---

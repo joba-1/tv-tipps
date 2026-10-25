@@ -583,7 +583,7 @@
       <!-- Power row -->
       <div class="remote-power-row">
         <button class="outline remote-btn" @click="remoteOn()"       :disabled="remoteSending" x-text="t('btn.remote_on')"></button>
-        <button class="outline remote-btn" @click="sendKey('power')" :disabled="remoteSending">⏸ Standby</button>
+        <button class="outline remote-btn" @click="sendKey('power')" :disabled="remoteSending">Standby</button>
         <button class="outline secondary remote-btn" @click="remoteOff()" :disabled="remoteSending" x-text="t('btn.remote_off')"></button>
       </div>
 
@@ -615,7 +615,10 @@
       <!-- Nav row -->
       <div class="remote-nav-row">
         <button class="outline remote-btn" @click="sendKey('menu')" :disabled="remoteSending">☰ Menu</button>
-        <button class="outline remote-btn" @click="sendKey('back')" :disabled="remoteSending">↩ Back</button>
+        <button class="outline remote-btn" @click="sendKey('exit')" :disabled="remoteSending">↩ Exit</button>
+        <button class="outline remote-btn" @click="sendKey('play')" :disabled="remoteSending">▶</button>
+        <button class="outline remote-btn" @click="sendKey('pause')" :disabled="remoteSending">⏸</button>
+        <button class="outline remote-btn" @click="sendKey('stop')" :disabled="remoteSending">⏹</button>
       </div>
 
       <!-- Color buttons -->
