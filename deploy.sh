@@ -3,7 +3,7 @@
 #
 # Usage: sudo ./deploy.sh [--prefix DIR] [--port PORT] [--user USER]
 #   --prefix DIR   install root (default: /usr/local)
-#   --port   PORT  listening port  (default: 8844)
+#   --port   PORT  listening port  (default: 8120)
 #   --user   USER  service user    (default: current user)
 #
 # Layout after install:
@@ -16,7 +16,7 @@ set -euo pipefail
 
 # ── defaults ──────────────────────────────────────────────────────────────────
 PREFIX=/usr/local
-PORT=8844
+PORT=8120
 SERVICE_USER=${SUDO_USER:-$(id -un)}
 
 # ── argument parsing ──────────────────────────────────────────────────────────

@@ -28,9 +28,9 @@ pytest tests/test_scoring.py -q   # focused subset (score pipeline)
 System smoke (against the running service):
 
 ```bash
-curl -s http://localhost:8844/api/admin/status | python3 -m json.tool
-curl -s 'http://localhost:8844/api/recommendations?context=now' -H 'cookie: user=joachim' | jq '.recommendations|length'
-curl -s http://localhost:8844/api/receivers | jq '.[].online'
+curl -s http://localhost:8120/api/admin/status | python3 -m json.tool
+curl -s 'http://localhost:8120/api/recommendations?context=now' -H 'cookie: user=joachim' | jq '.recommendations|length'
+curl -s http://localhost:8120/api/receivers | jq '.[].online'
 ```
 
 Run tests + a quick curl before declaring backend changes done. UI changes need a browser check — say so explicitly if you can't run one.
@@ -50,6 +50,7 @@ Run tests + a quick curl before declaring backend changes done. UI changes need 
 
 ```bash
 sudo ./deploy.sh                                  # idempotent install/upgrade; never overwrites /etc/tv-tipps/env
+                                                  # default port 8120: job6's Apache owns 8844 (public TLS+Authelia) and proxies to it
 sudo ./deploy.sh --prefix /opt --port 8765 --user me
 sudo ./undeploy.sh                                # remove tv-tipps; keeps DB
 sudo ./undeploy.sh --purge-db                     # also remove /var/lib/tv-tipps

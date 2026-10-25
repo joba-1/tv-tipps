@@ -9,8 +9,8 @@ It learns your viewing habits and surfaces the programmes you are most likely to
 
 Open the app in any browser on your home network:
 
-```
-http://<server-address>:8844
+http://<server-address>:8120          # at home
+https://banzhaf.chickenkiller.com:8844  # from anywhere, with login
 ```
 
 On your first visit the app automatically detects your browser language (German, English, or other).

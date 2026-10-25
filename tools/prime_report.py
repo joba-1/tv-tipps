@@ -36,7 +36,9 @@ from datetime import datetime
 UNIT = "tv-tipps"
 DB_PATH = "/var/lib/tv-tipps/tv_tipps.db"
 ENV_PATH = "/etc/tv-tipps/env"
-STATUS_URL = "http://localhost:8844/api/admin/status"
+# The app port, not the public one: on job6 Apache owns 8844 (TLS + Authelia)
+# and proxies to 127.0.0.1:8120.
+STATUS_URL = "http://localhost:8120/api/admin/status"
 # The committed defaults (config.py). A run using anything else is running under
 # a hand-set override — fine for a diagnostic night, easy to forget afterwards,
 # and expensive: a widened dwell keeps the box powered far longer every night.

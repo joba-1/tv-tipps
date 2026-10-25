@@ -43,7 +43,7 @@ sudo ./deploy.sh [--prefix DIR] [--port PORT] [--user USER]
 | Option | Default | Description |
 |--------|---------|-------------|
 | `--prefix DIR` | `/usr/local` | Install root; app lands in `$PREFIX/lib/tv-tipps/` |
-| `--port PORT` | `8844` | Listening port |
+| `--port PORT` | `8120` | Listening port. On job6 the public port 8844 belongs to Apache (TLS + Authelia), which proxies to `127.0.0.1:8120` — deploying with `--port 8844` makes the app fail to bind. |
 | `--user USER` | current sudo user | OS user that owns and runs the service |
 
 Example:
@@ -64,7 +64,7 @@ sudo ./deploy.sh --prefix /opt --port 8765 --user myuser
 
 1. Edit `/etc/tv-tipps/env` — set your receiver IPs, usernames, and Ollama model
 2. `sudo systemctl restart tv-tipps`
-3. Open `http://<host>:8844/`
+3. Open `http://<host>:8120/` (on job6 publicly: `https://banzhaf.chickenkiller.com:8844/` via Apache)
 
 ### Updating
 
@@ -180,7 +180,7 @@ Type=simple
 User=myuser
 WorkingDirectory=/usr/local/lib/tv-tipps
 EnvironmentFile=/etc/tv-tipps/env
-ExecStart=/usr/local/lib/tv-tipps/.venv/bin/uvicorn main:app --host 0.0.0.0 --port 8844
+ExecStart=/usr/local/lib/tv-tipps/.venv/bin/uvicorn main:app --host 0.0.0.0 --port 8120
 Restart=on-failure
 RestartSec=5
 
